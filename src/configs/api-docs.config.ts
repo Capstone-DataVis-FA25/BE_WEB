@@ -9,8 +9,8 @@ const api_documentation_credentials = {
 
 export function configSwagger(app: INestApplication) {
 	const config = new DocumentBuilder()
-		.setTitle('Safe Edu project')
-		.setDescription('## The Safe Edu API description')
+		.setTitle('Data Vis project')
+		.setDescription('## The Data Vis API description')
 		.setVersion('1.0')
 		.addSecurity('token', { type: 'http', scheme: 'bearer' })
 		.build();
@@ -61,7 +61,7 @@ export function configSwagger(app: INestApplication) {
 	SwaggerModule.setup('api-docs', app, document, {
 		swaggerOptions: { persistAuthorization: true },
 		customJs: '/swagger-custom.js',
-		customSiteTitle: 'Safe Edu Documentation',
+		customSiteTitle: 'Data Vis Documentation',
 		customfavIcon: '/swagger.ico',
 	});
 }
