@@ -49,7 +49,7 @@ export class AuthService {
 		});
 
 		// Generate tokens
-		const tokens = await this.generateTokens(user.id, user.email);
+		const tokens = await this.generateTokens(user.id, user.email, user.role as UserRole);
 
 		// Save refresh token
 		await this.usersService.updateRefreshToken(user.id, tokens.refresh_token);
@@ -70,7 +70,7 @@ export class AuthService {
 			throw new UnauthorizedException('Account is deactivated');
 		}
 
-		const tokens = await this.generateTokens(user.id, user.email);
+		const tokens = await this.generateTokens(user.id, user.email, user.role as UserRole);
 		await this.usersService.updateRefreshToken(user.id, tokens.refresh_token);
 
 		// Remove password from response
@@ -116,7 +116,7 @@ export class AuthService {
 				);
 			}
 
-			const tokens = await this.generateTokens(user.id, user.email);
+			const tokens = await this.generateTokens(user.id, user.email, user.role as UserRole);
 			await this.usersService.updateRefreshToken(user.id, tokens.refresh_token);
 
 			// Remove password from response
@@ -147,7 +147,7 @@ export class AuthService {
 			throw new UnauthorizedException('Invalid refresh token');
 		}
 
-		const tokens = await this.generateTokens(user.id, user.email);
+		const tokens = await this.generateTokens(user.id, user.email, user.role as UserRole);
 		await this.usersService.updateRefreshToken(user.id, tokens.refresh_token);
 
 		return tokens;
@@ -157,8 +157,19 @@ export class AuthService {
 		await this.usersService.removeRefreshToken(userId);
 	}
 
-	private async generateTokens(userId: string, email: string): Promise<any> {
-		const payload: TokenPayload = { sub: userId, email };
+	async unActiveUser(userId: string): Promise<void> {
+		const user = await this.usersService.findOne(userId);
+		if (!user) {
+			throw new BadRequestException('User not found');
+		}
+
+		await this.usersService.update(userId, { isActive: false });
+		// Remove refresh token when deactivating user
+		await this.usersService.removeRefreshToken(userId);
+	}
+
+	private async generateTokens(userId: string, email: string, role: UserRole): Promise<any> {
+		const payload: TokenPayload = { sub: userId, email, role };
 
 		const accessToken = this.jwtService.sign(payload, {
 			secret: access_token_private_key,

@@ -6,12 +6,18 @@ import {
 	HttpStatus,
 	UseGuards,
 	Req,
+	Param,
+	Patch,
 } from '@nestjs/common';
 import { AuthService } from './auth.service';
 import { SignInDto } from './dto/sign-in.dto';
 import { SignUpDto } from './dto/sign-up.dto';
-import { ApiTags, ApiOperation, ApiResponse } from '@nestjs/swagger';
+import { ApiTags, ApiOperation, ApiResponse, ApiBearerAuth } from '@nestjs/swagger';
 import { JwtRefreshGuard } from './guards/jwt-refresh.guard';
+import { JwtAccessTokenGuard } from './guards/jwt-access-token.guard';
+import { RolesGuard } from './guards/roles.guard';
+import { Roles } from 'src/decorators/auth.decorator';
+import { UserRole } from '../users/dto/create-user.dto';
 import { Request } from 'express';
 
 interface AuthRequest extends Request {
@@ -62,5 +68,39 @@ export class AuthController {
 		return this.authService.refreshTokens(userId, token);
 	}
 
+	@UseGuards(JwtAccessTokenGuard, RolesGuard)
+	@Roles(UserRole.ADMIN)
+	@Patch('unactive/:id')
+	@ApiBearerAuth()
+	@ApiOperation({ summary: 'Deactivate user account (Admin only)' })
+	@ApiResponse({ status: 200, description: 'User deactivated successfully' })
+	@ApiResponse({ status: 403, description: 'Insufficient permissions' })
+	@ApiResponse({ status: 404, description: 'User not found' })
+	async unActiveUser(@Param('id') id: string) {
+		await this.authService.unActiveUser(id);
+		return { message: 'User deactivated successfully' };
+	}
 
+	@UseGuards(JwtAccessTokenGuard)
+	@Patch('unactive')
+	@ApiBearerAuth()
+	@ApiOperation({ summary: 'Deactivate own account' })
+	@ApiResponse({ status: 200, description: 'Account deactivated successfully' })
+	@ApiResponse({ status: 401, description: 'Unauthorized' })
+	@ApiResponse({ status: 404, description: 'User not found' })
+	async unActiveSelf(@Req() req: AuthRequest) {
+		await this.authService.unActiveUser(req.user.sub);
+		return { message: 'Account deactivated successfully' };
+	}
+
+	@UseGuards(JwtAccessTokenGuard, RolesGuard)
+	@Roles(UserRole.ADMIN)
+	@Post('signout/:id')
+	@ApiBearerAuth()
+	@ApiOperation({ summary: 'Sign out user by admin' })
+	@ApiResponse({ status: 200, description: 'User signed out successfully' })
+	async signOutUser(@Param('id') id: string) {
+		await this.authService.signOut(id);
+		return { message: 'User signed out successfully' };
+	}
 }

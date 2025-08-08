@@ -10,8 +10,11 @@ import {
 } from '@nestjs/common';
 import { ApiTags, ApiOperation, ApiResponse, ApiBearerAuth } from '@nestjs/swagger';
 import { UsersService } from './users.service';
-import { CreateUserDto } from './dto/create-user.dto';
+import { CreateUserDto, UserRole } from './dto/create-user.dto';
 import { UpdateUserDto } from './dto/update-user.dto';
+import { JwtAccessTokenGuard } from '../auth/guards/jwt-access-token.guard';
+import { RolesGuard } from '../auth/guards/roles.guard';
+import { Roles } from 'src/decorators/auth.decorator';
 
 
 @ApiTags('users')
@@ -47,9 +50,14 @@ export class UsersController {
 		return this.usersService.update(id, updateUserDto);
 	}
 
+	@UseGuards(JwtAccessTokenGuard, RolesGuard)
+	@Roles(UserRole.ADMIN)
 	@Delete(':id')
-	@ApiOperation({ summary: 'Delete user by ID' })
+	@ApiBearerAuth()
+	@ApiOperation({ summary: 'Delete user by ID (Admin only)' })
 	@ApiResponse({ status: 200, description: 'User deleted successfully' })
+	@ApiResponse({ status: 403, description: 'Insufficient permissions - Admin role required' })
+	@ApiResponse({ status: 404, description: 'User not found' })
 	remove(@Param('id') id: string) {
 		return this.usersService.remove(id);
 	}
