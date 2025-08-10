@@ -2,17 +2,21 @@ import {
 	Body,
 	Controller,
 	Post,
+	Get,
 	HttpCode,
 	HttpStatus,
 	UseGuards,
 	Req,
+	Res,
 } from '@nestjs/common';
 import { AuthService } from './auth.service';
 import { SignInDto } from './dto/sign-in.dto';
 import { SignUpDto } from './dto/sign-up.dto';
 import { ApiTags, ApiOperation, ApiResponse } from '@nestjs/swagger';
-import { JwtRefreshGuard } from './guards/jwt-refresh.guard';
-import { Request } from 'express';
+import { Request, Response } from 'express';
+import { JwtRefreshTokenGuard } from './guards/jwt-refresh-token.guard';
+import { GoogleAuthGuard } from './guards/google.guard';
+import { ConfigService } from '@nestjs/config';
 
 interface AuthRequest extends Request {
 	user: {
@@ -28,7 +32,10 @@ interface AuthRequest extends Request {
 @ApiTags('auth')
 @Controller('auth')
 export class AuthController {
-	constructor(private authService: AuthService) {}
+	constructor(
+		private authService: AuthService,
+		private configService: ConfigService,
+	) { }
 
 	@Post('signup')
 	@ApiOperation({ summary: 'User registration' })
@@ -45,14 +52,35 @@ export class AuthController {
 		return this.authService.signIn(signInDto);
 	}
 
-	@Post('google')
-	@ApiOperation({ summary: 'Google authentication' })
-	@ApiResponse({ status: 200, description: 'Google authentication successful' })
-	authenticateWithGoogle(@Body('googleToken') googleToken: string) {
-		return this.authService.authenticateWithGoogle(googleToken);
+	@Get('google')
+	@UseGuards(GoogleAuthGuard)
+	@ApiOperation({ summary: 'Initiate Google OAuth2 authentication' })
+	@ApiResponse({ status: 200, description: 'Redirects to Google OAuth2' })
+	async googleAuth() {
+		// This will redirect to Google OAuth2
 	}
 
-	@UseGuards(JwtRefreshGuard)
+	@Get('google/callback')
+	@UseGuards(GoogleAuthGuard)
+	@ApiOperation({ summary: 'Google OAuth2 callback' })
+	@ApiResponse({ status: 200, description: 'Google authentication successful' })
+	async googleAuthCallback(@Req() req: any, @Res() res: Response) {
+		const { user } = req;
+		const result = await this.authService.authenticateWithGoogleUser(user);
+
+		// Redirect to frontend with tokens
+		const redirectUrl = `${this.configService.get('FRONTEND_URL')}/auth/callback?access_token=${result.tokens.access_token}&refresh_token=${result.tokens.refresh_token}`;
+		res.redirect(redirectUrl);
+	}
+
+	@Post('google/token')
+	@ApiOperation({ summary: 'Google authentication with ID token' })
+	@ApiResponse({ status: 200, description: 'Google authentication successful' })
+	authenticateWithGoogleToken(@Body('idToken') idToken: string) {
+		return this.authService.authenticateWithGoogle(idToken);
+	}
+
+	@UseGuards(JwtRefreshTokenGuard)
 	@Post('refresh')
 	@ApiOperation({ summary: 'Refresh access token' })
 	@ApiResponse({ status: 200, description: 'Token refreshed successfully' })
