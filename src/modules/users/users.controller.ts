@@ -45,7 +45,7 @@ export class UsersController {
 	}
 
 	//Change password API
-	@Patch('change-password')
+	@Patch('me/change-password')
 	@ApiOperation({ summary: 'Change user password' })
 	@UseGuards(JwtAccessTokenGuard)
 	changePassword(@Request() req: AuthRequest, @Body() changePasswordDto: ChangePasswordDTO) {
