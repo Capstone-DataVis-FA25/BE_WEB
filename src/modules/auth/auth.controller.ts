@@ -14,7 +14,7 @@ import { ApiTags, ApiOperation, ApiResponse } from '@nestjs/swagger';
 import { JwtRefreshGuard } from './guards/jwt-refresh.guard';
 import { Request } from 'express';
 
-interface AuthRequest extends Request {
+export interface AuthRequest extends Request {
 	user: {
 		sub: string;
 		email: string;

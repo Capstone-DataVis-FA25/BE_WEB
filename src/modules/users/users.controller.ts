@@ -7,17 +7,21 @@ import {
 	Param,
 	Delete,
 	UseGuards,
+	Request,
 } from '@nestjs/common';
 import { ApiTags, ApiOperation, ApiResponse, ApiBearerAuth } from '@nestjs/swagger';
 import { UsersService } from './users.service';
 import { CreateUserDto } from './dto/create-user.dto';
 import { UpdateUserDto } from './dto/update-user.dto';
+import { ChangePasswordDTO } from './dto/change-password.dto';
+import { JwtAccessTokenGuard } from '@modules/auth/guards/jwt-access-token.guard';
+import { AuthRequest } from '@modules/auth/auth.controller';
 
 
 @ApiTags('users')
 @Controller('users')
 export class UsersController {
-	constructor(private readonly usersService: UsersService) {}
+	constructor(private readonly usersService: UsersService) { }
 
 	@Post()
 	@ApiOperation({ summary: 'Create a new user' })
@@ -38,6 +42,14 @@ export class UsersController {
 	@ApiResponse({ status: 200, description: 'User found' })
 	findOne(@Param('id') id: string) {
 		return this.usersService.findOne(id);
+	}
+
+	//Change password API
+	@Patch('change-password')
+	@ApiOperation({ summary: 'Change user password' })
+	@UseGuards(JwtAccessTokenGuard)
+	changePassword(@Request() req: AuthRequest, @Body() changePasswordDto: ChangePasswordDTO) {
+		return this.usersService.changePassword(req.user.userId, changePasswordDto);
 	}
 
 	@Patch(':id')
