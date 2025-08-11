@@ -18,7 +18,7 @@ import { JwtRefreshTokenGuard } from './guards/jwt-refresh-token.guard';
 import { GoogleAuthGuard } from './guards/google.guard';
 import { ConfigService } from '@nestjs/config';
 
-interface AuthRequest extends Request {
+export interface AuthRequest extends Request {
 	user: {
 		sub: string;
 		email: string;
