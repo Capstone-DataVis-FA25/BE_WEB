@@ -192,29 +192,29 @@ export class AuthService {
     return tokens;
   }
 
-  // async verifyEmail(token: string): Promise<any> {
-  //   try {
-  //     // Giải mã token
-  //     const payload = this.jwtService.verify(token, {
-  //       secret: this.configService.get("jwt.access_token_private_key"),
-  //     });
-  //     const userId = payload.sub;
-  //     const user = await this.usersService.findOne(userId);
-  //     if (!user) {
-  //       throw new BadRequestException("User not found");
-  //     }
-  //     if (user.) {
-  //       return { message: "Email đã được xác thực trước đó." };
-  //     }
-  //     // Cập nhật trạng thái xác thực
-  //     await this.usersService.verifyEmail(userId);
-  //     return { message: "Xác thực email thành công." };
-  //   } catch (error) {
-  //     throw new BadRequestException(
-  //       "Token xác thực không hợp lệ hoặc đã hết hạn"
-  //     );
-  //   }
-  // }
+  async verifyEmail(token: string): Promise<any> {
+    try {
+      // Giải mã token
+      const payload = this.jwtService.verify(token, {
+        secret: this.configService.get("jwt.access_token_private_key"),
+      });
+      const userId = payload.sub;
+      const user = await this.usersService.findByEmail(payload.email);
+      if (!user) {
+        throw new BadRequestException("User not found");
+      }
+      if (user.isVerified) {
+        return { message: "Email đã được xác thực trước đó." };
+      }
+      // Cập nhật trạng thái xác thực
+      await this.usersService.update(userId, { isVerified: true });
+      return { message: "Xác thực email thành công." };
+    } catch (error) {
+      throw new BadRequestException(
+        "Token xác thực không hợp lệ hoặc đã hết hạn"
+      );
+    }
+  }
 
   async signOut(userId: string): Promise<void> {
     await this.usersService.removeRefreshToken(userId);
