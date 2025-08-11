@@ -1,8 +1,9 @@
-import { Injectable } from '@nestjs/common';
+import { Injectable, ConflictException } from '@nestjs/common';
 import { PrismaService } from '../../prisma/prisma.service';
 import { CreateUserDto, UserRole } from './dto/create-user.dto';
 import { UpdateUserDto } from './dto/update-user.dto';
 import { User, UserWithoutPassword } from '../../types/user.types';
+import { UpdateProfileDto } from '../auth/dto/update-profile.dto';
 import * as bcrypt from 'bcryptjs';
 
 @Injectable()
@@ -126,5 +127,33 @@ export class UsersService {
 				currentHashedRefreshToken: null,
 			},
 		});
+	}
+
+	async updateProfile(userId: string, updateProfileDto: UpdateProfileDto): Promise<User> {
+		// Check if email is being updated and if it's already taken
+		if (updateProfileDto.email) {
+			const existingUser = await this.prisma.user.findUnique({
+				where: { 
+					email: updateProfileDto.email,
+					NOT: { id: userId }
+				}
+			});
+			
+			if (existingUser) {
+				throw new ConflictException('Email already exists');
+			}
+		}
+
+		// Update user profile
+		const updatedUser = await this.prisma.user.update({
+			where: { id: userId },
+			data: {
+				firstName: updateProfileDto.firstName,
+				lastName: updateProfileDto.lastName,
+				email: updateProfileDto.email,
+			},
+		});
+
+		return updatedUser as User;
 	}
 }
