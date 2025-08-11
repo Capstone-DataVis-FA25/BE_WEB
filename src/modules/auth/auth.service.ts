@@ -1,178 +1,228 @@
-import * as bcrypt from 'bcryptjs';
-import { ConfigService } from '@nestjs/config';
-import { JwtService } from '@nestjs/jwt';
+import * as bcrypt from "bcryptjs";
+import { ConfigService } from "@nestjs/config";
+import { JwtService } from "@nestjs/jwt";
 import {
-	BadRequestException,
-	ConflictException,
-	Injectable,
-	UnauthorizedException,
-	HttpException,
-	HttpStatus,
-} from '@nestjs/common';
-import { UsersService } from '../users/users.service';
-import { SignUpDto } from './dto/sign-up.dto';
-import { SignInDto } from './dto/sign-in.dto';
-import { User } from '../../types/user.types';
-import { UserRole } from '../users/dto/create-user.dto';
-import { TokenPayload } from './interfaces/token.interface';
+  BadRequestException,
+  ConflictException,
+  Injectable,
+  UnauthorizedException,
+  HttpException,
+  HttpStatus,
+} from "@nestjs/common";
+import { UsersService } from "../users/users.service";
+import { SignUpDto } from "./dto/sign-up.dto";
+import { SignInDto } from "./dto/sign-in.dto";
+import { User } from "../../types/user.types";
+import { UserRole } from "../users/dto/create-user.dto";
+import { TokenPayload } from "./interfaces/token.interface";
 import {
-	access_token_private_key,
-	refresh_token_private_key,
-} from 'src/constraints/jwt.constraint';
+  access_token_private_key,
+  refresh_token_private_key,
+} from "src/constraints/jwt.constraint";
+import { EmailService } from "../email/email.service";
 
 export interface GoogleUser {
-	email: string;
-	firstName?: string;
-	lastName?: string;
-	picture?: string;
+  email: string;
+  firstName?: string;
+  lastName?: string;
+  picture?: string;
 }
 
 @Injectable()
 export class AuthService {
-	constructor(
-		private readonly configService: ConfigService,
-		private readonly usersService: UsersService,
-		private readonly jwtService: JwtService,
-	) {}
+  constructor(
+    private readonly configService: ConfigService,
+    private readonly usersService: UsersService,
+    private readonly jwtService: JwtService,
+    private readonly emailService: EmailService
+  ) {}
 
-	async signUp(signUpDto: SignUpDto): Promise<{ user: Partial<User>; tokens: any }> {
-		// Check if user exists
-		const existingUser = await this.usersService.findByEmail(signUpDto.email);
-		if (existingUser) {
-			throw new ConflictException('User with this email already exists');
-		}
+  async signUp(
+    signUpDto: SignUpDto
+  ): Promise<{ user: Partial<User>; tokens: any }> {
+    // Check if user exists
+    const existingUser = await this.usersService.findByEmail(signUpDto.email);
+    if (existingUser) {
+      throw new ConflictException("User with this email already exists");
+    }
 
-		// Create user
-		const user = await this.usersService.create({
-			...signUpDto,
-			role: UserRole.USER,
-		});
+    // Create user
+    const user = await this.usersService.create({
+      ...signUpDto,
+      role: UserRole.USER,
+    });
 
-		// Generate tokens
-		const tokens = await this.generateTokens(user.id, user.email);
+    // Generate tokens
+    const tokens = await this.generateTokens(user.id, user.email);
 
-		// Save refresh token
-		await this.usersService.updateRefreshToken(user.id, tokens.refresh_token);
+    // Generate verify email token
+    const verifyToken = this.jwtService.sign(
+      { sub: user.id, email: user.email },
+      {
+        secret: this.configService.get("jwt.access_token_private_key"),
+        expiresIn: "30m",
+      }
+    );
 
-		// Remove password from response
-		const { password, ...userResponse } = user;
+    // Generate verify link
+    const verifyLink = `${this.configService.get("frontend_url")}/verify-email?token=${verifyToken}`;
 
-		return { user: userResponse, tokens };
-	}
+    // Send verify email
+    await this.emailService.sendEmailVerification(user.email, verifyLink);
 
-	async signIn(signInDto: SignInDto): Promise<{ user: Partial<User>; tokens: any }> {
-		const user = await this.validateUser(signInDto.email, signInDto.password);
-		if (!user) {
-			throw new UnauthorizedException('Invalid credentials');
-		}
+    // Save refresh token
+    await this.usersService.updateRefreshToken(user.id, tokens.refresh_token);
 
-		if (!user.isActive) {
-			throw new UnauthorizedException('Account is deactivated');
-		}
+    // Remove password from response
+    const { password, ...userResponse } = user;
 
-		const tokens = await this.generateTokens(user.id, user.email);
-		await this.usersService.updateRefreshToken(user.id, tokens.refresh_token);
+    return { user: userResponse, tokens };
+  }
 
-		// Remove password from response
-		const { password, ...userResponse } = user;
+  async signIn(
+    signInDto: SignInDto
+  ): Promise<{ user: Partial<User>; tokens: any }> {
+    const user = await this.validateUser(signInDto.email, signInDto.password);
+    if (!user) {
+      throw new UnauthorizedException("Invalid credentials");
+    }
 
-		return { user: userResponse, tokens };
-	}
+    if (!user.isActive) {
+      throw new UnauthorizedException("Account is deactivated");
+    }
 
-	async authenticateWithGoogle(googleToken: string): Promise<{ user: Partial<User>; tokens: any }> {
-		try {
-			// Decode Google token (in production, you should verify it with Google)
-			const decodedToken = this.jwtService.decode(googleToken) as { 
-				email: string; 
-				given_name?: string; 
-				family_name?: string; 
-				picture?: string;
-			};
+    const tokens = await this.generateTokens(user.id, user.email);
+    await this.usersService.updateRefreshToken(user.id, tokens.refresh_token);
 
-			if (!decodedToken || !decodedToken.email) {
-				throw new HttpException(
-					{ message: 'Invalid Google token', error: 'Bad Request' },
-					HttpStatus.BAD_REQUEST,
-				);
-			}
+    // Remove password from response
+    const { password, ...userResponse } = user;
 
-			let user = await this.usersService.findByEmail(decodedToken.email);
+    return { user: userResponse, tokens };
+  }
 
-			// If user doesn't exist, create new user
-			if (!user) {
-				user = await this.usersService.create({
-					email: decodedToken.email,
-					firstName: decodedToken.given_name || '',
-					lastName: decodedToken.family_name || '',
-					password: Math.random().toString(36), // Random password for Google users
-					role: UserRole.USER,
-				});
-			}
+  async authenticateWithGoogle(
+    googleToken: string
+  ): Promise<{ user: Partial<User>; tokens: any }> {
+    try {
+      // Decode Google token (in production, you should verify it with Google)
+      const decodedToken = this.jwtService.decode(googleToken) as {
+        email: string;
+        given_name?: string;
+        family_name?: string;
+        picture?: string;
+      };
 
-			if (!user.isActive) {
-				throw new HttpException(
-					{ message: 'Account is deactivated', error: 'Unauthorized' },
-					HttpStatus.UNAUTHORIZED,
-				);
-			}
+      if (!decodedToken || !decodedToken.email) {
+        throw new HttpException(
+          { message: "Invalid Google token", error: "Bad Request" },
+          HttpStatus.BAD_REQUEST
+        );
+      }
 
-			const tokens = await this.generateTokens(user.id, user.email);
-			await this.usersService.updateRefreshToken(user.id, tokens.refresh_token);
+      let user = await this.usersService.findByEmail(decodedToken.email);
 
-			// Remove password from response
-			const { password, ...userResponse } = user;
+      // If user doesn't exist, create new user
+      if (!user) {
+        user = await this.usersService.create({
+          email: decodedToken.email,
+          firstName: decodedToken.given_name || "",
+          lastName: decodedToken.family_name || "",
+          password: Math.random().toString(36), // Random password for Google users
+          role: UserRole.USER,
+        });
+      }
 
-			return { user: userResponse, tokens };
+      if (!user.isActive) {
+        throw new HttpException(
+          { message: "Account is deactivated", error: "Unauthorized" },
+          HttpStatus.UNAUTHORIZED
+        );
+      }
 
-		} catch (error) {
-			throw new BadRequestException({
-				statusCode: HttpStatus.INTERNAL_SERVER_ERROR,
-				error: error.message,
-				message: 'Có lỗi xảy ra với Google authentication, vui lòng thử lại sau',
-			});
-		}
-	}
+      const tokens = await this.generateTokens(user.id, user.email);
+      await this.usersService.updateRefreshToken(user.id, tokens.refresh_token);
 
-	async validateUser(email: string, password: string): Promise<User | null> {
-		const user = await this.usersService.findByEmail(email);
-		if (user && await bcrypt.compare(password, user.password)) {
-			return user;
-		}
-		return null;
-	}
+      // Remove password from response
+      const { password, ...userResponse } = user;
 
-	async refreshTokens(userId: string, refreshToken: string): Promise<any> {
-		const user = await this.usersService.getUserIfRefreshTokenMatches(refreshToken, userId);
-		if (!user) {
-			throw new UnauthorizedException('Invalid refresh token');
-		}
+      return { user: userResponse, tokens };
+    } catch (error) {
+      throw new BadRequestException({
+        statusCode: HttpStatus.INTERNAL_SERVER_ERROR,
+        error: error.message,
+        message:
+          "Có lỗi xảy ra với Google authentication, vui lòng thử lại sau",
+      });
+    }
+  }
 
-		const tokens = await this.generateTokens(user.id, user.email);
-		await this.usersService.updateRefreshToken(user.id, tokens.refresh_token);
+  async validateUser(email: string, password: string): Promise<User | null> {
+    const user = await this.usersService.findByEmail(email);
+    if (user && (await bcrypt.compare(password, user.password))) {
+      return user;
+    }
+    return null;
+  }
 
-		return tokens;
-	}
+  async refreshTokens(userId: string, refreshToken: string): Promise<any> {
+    const user = await this.usersService.getUserIfRefreshTokenMatches(
+      refreshToken,
+      userId
+    );
+    if (!user) {
+      throw new UnauthorizedException("Invalid refresh token");
+    }
 
-	async signOut(userId: string): Promise<void> {
-		await this.usersService.removeRefreshToken(userId);
-	}
+    const tokens = await this.generateTokens(user.id, user.email);
+    await this.usersService.updateRefreshToken(user.id, tokens.refresh_token);
 
-	private async generateTokens(userId: string, email: string): Promise<any> {
-		const payload: TokenPayload = { sub: userId, email };
+    return tokens;
+  }
 
-		const accessToken = this.jwtService.sign(payload, {
-			secret: access_token_private_key,
-			expiresIn: `${this.configService.get('jwt.access_token_expiration_time')}s`,
-		});
+  // async verifyEmail(token: string): Promise<any> {
+  //   try {
+  //     // Giải mã token
+  //     const payload = this.jwtService.verify(token, {
+  //       secret: this.configService.get("jwt.access_token_private_key"),
+  //     });
+  //     const userId = payload.sub;
+  //     const user = await this.usersService.findOne(userId);
+  //     if (!user) {
+  //       throw new BadRequestException("User not found");
+  //     }
+  //     if (user.) {
+  //       return { message: "Email đã được xác thực trước đó." };
+  //     }
+  //     // Cập nhật trạng thái xác thực
+  //     await this.usersService.verifyEmail(userId);
+  //     return { message: "Xác thực email thành công." };
+  //   } catch (error) {
+  //     throw new BadRequestException(
+  //       "Token xác thực không hợp lệ hoặc đã hết hạn"
+  //     );
+  //   }
+  // }
 
-		const refreshToken = this.jwtService.sign(payload, {
-			secret: refresh_token_private_key,
-			expiresIn: `${this.configService.get('jwt.refresh_token_expiration_time')}s`,
-		});
+  async signOut(userId: string): Promise<void> {
+    await this.usersService.removeRefreshToken(userId);
+  }
 
-		return {
-			access_token: accessToken,
-			refresh_token: refreshToken,
-		};
-	}
+  private async generateTokens(userId: string, email: string): Promise<any> {
+    const payload: TokenPayload = { sub: userId, email };
+
+    const accessToken = this.jwtService.sign(payload, {
+      secret: access_token_private_key,
+      expiresIn: `${this.configService.get("jwt.access_token_expiration_time")}s`,
+    });
+
+    const refreshToken = this.jwtService.sign(payload, {
+      secret: refresh_token_private_key,
+      expiresIn: `${this.configService.get("jwt.refresh_token_expiration_time")}s`,
+    });
+
+    return {
+      access_token: accessToken,
+      refresh_token: refreshToken,
+    };
+  }
 }
