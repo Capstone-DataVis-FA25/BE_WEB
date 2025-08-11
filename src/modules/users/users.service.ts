@@ -5,6 +5,7 @@ import { UpdateUserDto } from './dto/update-user.dto';
 import { User, UserWithoutPassword } from '../../types/user.types';
 import { UpdateProfileDto } from '../auth/dto/update-profile.dto';
 import * as bcrypt from 'bcryptjs';
+import { ChangePasswordDTO } from './dto/change-password.dto';
 
 @Injectable()
 export class UsersService {
@@ -155,5 +156,30 @@ export class UsersService {
 		});
 
 		return updatedUser as User;
+	}
+	async changePassword(userId : string, dto : ChangePasswordDTO){
+		const user = await this.prisma.user.findUnique({
+			where: { id: userId },
+		});
+
+		if (!user){
+			throw new Error('User not found');
+		};
+
+		if (dto.new_password !== dto.confirm_password) {
+			throw new Error('New password and confirmation password do not match');
+		}
+
+		const isOldPasswordValid = await bcrypt.compare(dto.old_password, user.password);
+		if (!isOldPasswordValid) {
+			throw new Error('Old password is incorrect');
+		}
+
+		const hashedNewPassword = await bcrypt.hash(dto.new_password, 10);
+		if(hashedNewPassword)
+		await this.prisma.user.update({
+			where: { id: userId },
+			data: { password: hashedNewPassword },
+		});
 	}
 }
