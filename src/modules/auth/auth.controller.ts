@@ -21,77 +21,66 @@ import { ForgotPasswordDto } from './dto/forgot-password.dto';
 import { ResetPasswordDto } from './dto/reset-password.dto';
 
 export interface AuthRequest extends Request {
-	user: {
-		sub: string;
-		email: string;
-		userId?: string;
-		refreshToken?: string;
-		role?: string;
-		isActive?: boolean;
-	};
+  user: {
+    sub: string;
+    email: string;
+    userId?: string;
+    refreshToken?: string;
+    role?: string;
+    isActive?: boolean;
+  };
 }
 
-@ApiTags('auth')
-@Controller('auth')
+@ApiTags("auth")
+@Controller("auth")
 export class AuthController {
-	constructor(
-		private authService: AuthService,
-		private configService: ConfigService,
-	) { }
+  constructor(
+    private authService: AuthService,
+    private configService: ConfigService
+  ) {}
 
-	@Post('signup')
-	@ApiOperation({ summary: 'User registration' })
-	@ApiResponse({ status: 201, description: 'User registered successfully' })
-	signUp(@Body() signUpDto: SignUpDto) {
-		return this.authService.signUp(signUpDto);
-	}
+  @Post("signup")
+  @ApiOperation({ summary: "User registration" })
+  @ApiResponse({ status: 201, description: "User registered successfully" })
+  signUp(@Body() signUpDto: SignUpDto) {
+    return this.authService.signUp(signUpDto);
+  }
 
-	@HttpCode(HttpStatus.OK)
-	@Post('signin')
-	@ApiOperation({ summary: 'User login' })
-	@ApiResponse({ status: 200, description: 'User logged in successfully' })
-	signIn(@Body() signInDto: SignInDto) {
-		return this.authService.signIn(signInDto);
-	}
+  @HttpCode(HttpStatus.OK)
+  @Post("signin")
+  @ApiOperation({ summary: "User login" })
+  @ApiResponse({ status: 200, description: "User logged in successfully" })
+  signIn(@Body() signInDto: SignInDto) {
+    return this.authService.signIn(signInDto);
+  }
 
-	@Get('google')
-	@UseGuards(GoogleAuthGuard)
-	@ApiOperation({ summary: 'Initiate Google OAuth2 authentication' })
-	@ApiResponse({ status: 200, description: 'Redirects to Google OAuth2' })
-	async googleAuth() {
-		// This will redirect to Google OAuth2
-	}
+  @Get("google")
+  @UseGuards(GoogleAuthGuard)
+  @ApiOperation({ summary: "Initiate Google OAuth2 authentication" })
+  @ApiResponse({ status: 200, description: "Redirects to Google OAuth2" })
+  async googleAuth() {
+    // This will redirect to Google OAuth2
+  }
 
-	@Get('google/callback')
-	@UseGuards(GoogleAuthGuard)
-	@ApiOperation({ summary: 'Google OAuth2 callback' })
-	@ApiResponse({ status: 200, description: 'Google authentication successful' })
-	async googleAuthCallback(@Req() req: any, @Res() res: Response) {
-		const { user } = req;
-		const result = await this.authService.authenticateWithGoogleUser(user);
+  @Get("google/callback")
+  @UseGuards(GoogleAuthGuard)
+  @ApiOperation({ summary: "Google OAuth2 callback" })
+  @ApiResponse({ status: 200, description: "Google authentication successful" })
+  async googleAuthCallback(@Req() req: any, @Res() res: Response) {
+    const { user } = req;
+    const result = await this.authService.authenticateWithGoogleUser(user);
 
-		// Redirect to frontend with tokens
-		const redirectUrl = `${this.configService.get('FRONTEND_URL')}/auth/callback?access_token=${result.tokens.access_token}&refresh_token=${result.tokens.refresh_token}`;
-		res.redirect(redirectUrl);
-	}
+    // Redirect to frontend with tokens
+    const redirectUrl = `${this.configService.get("FRONTEND_URL")}/auth/callback?access_token=${result.tokens.access_token}&refresh_token=${result.tokens.refresh_token}`;
+    res.redirect(redirectUrl);
+  }
 
-	@Post('google/token')
-	@ApiOperation({ summary: 'Google authentication with ID token' })
-	@ApiResponse({ status: 200, description: 'Google authentication successful' })
-	authenticateWithGoogleToken(@Body('idToken') idToken: string) {
-		return this.authService.authenticateWithGoogle(idToken);
-	}
-
-	@UseGuards(JwtRefreshTokenGuard)
-	@Post('refresh')
-	@ApiOperation({ summary: 'Refresh access token' })
-	@ApiResponse({ status: 200, description: 'Token refreshed successfully' })
-	refreshTokens(@Req() req: AuthRequest, @Body('refreshToken') refreshToken: string) {
-		const userId = req.user.userId || req.user.sub;
-		const token = req.user.refreshToken || refreshToken;
-		return this.authService.refreshTokens(userId, token);
-	}
-
+  @Post("google/token")
+  @ApiOperation({ summary: "Google authentication with ID token" })
+  @ApiResponse({ status: 200, description: "Google authentication successful" })
+  authenticateWithGoogleToken(@Body("idToken") idToken: string) {
+    return this.authService.authenticateWithGoogle(idToken);
+  }
 	//Forgot password
 	@Post('forgot-password')
 	@ApiOperation({ summary: 'Forgot password' })
@@ -107,4 +96,29 @@ export class AuthController {
 	async resetPassword(@Body() resetPasswordDto: ResetPasswordDto) {
 		return this.authService.resetPassword(resetPasswordDto);
 	}
+  @UseGuards(JwtRefreshTokenGuard)
+  @Post("refresh")
+  @ApiOperation({ summary: "Refresh access token" })
+  @ApiResponse({ status: 200, description: "Token refreshed successfully" })
+  refreshTokens(
+    @Req() req: AuthRequest,
+    @Body("refreshToken") refreshToken: string
+  ) {
+    const userId = req.user.userId || req.user.sub;
+    const token = req.user.refreshToken || refreshToken;
+    return this.authService.refreshTokens(userId, token);
+  }
+
+  @Get("verify-email")
+  @ApiOperation({ summary: "Verify email" })
+  @ApiResponse({ status: 200, description: "Email verified successfully" })
+  async verifyEmail(@Query("token") token: string, @Res() res: Response) {
+    const result = await this.authService.verifyEmail(token);
+    if (result == null) {
+      return res.status(400).json({ message: "Verify account fail" });
+    }
+    return res.redirect(
+      `${this.configService.get("CLIENT_URL")}/verify-email-success`
+    );
+  }
 }

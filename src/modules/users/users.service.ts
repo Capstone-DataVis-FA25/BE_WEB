@@ -128,7 +128,6 @@ export class UsersService {
 			},
 		});
 	}
-
 	async changePassword(userId: string, dto: ChangePasswordDTO): Promise<{ message: string }> {
 		const user = await this.prisma.user.findUnique({
 			where: { id: userId },
@@ -157,5 +156,19 @@ export class UsersService {
 		return {
 			message: 'Password changed successfully'
 		};
+	}
+
+	// Update user profile
+	async updateProfile(userId: string, updateUserdto: UpdateUserDto): Promise<{user: User}> {
+		// Update user profile
+		const updatedUser = await this.prisma.user.update({
+			where: { id: userId },
+			data: {
+				firstName: updateUserdto.firstName,
+				lastName: updateUserdto.lastName,
+			},
+		});
+
+		return {user: updatedUser};
 	}
 }
