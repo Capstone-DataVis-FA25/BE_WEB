@@ -3,7 +3,7 @@ import { Injectable } from '@nestjs/common';
 
 @Injectable()
 export class EmailService {
-	constructor(private readonly mailerService: MailerService) {}
+	constructor(private readonly mailerService: MailerService) { }
 
 	async sendEmailVerification(email: string, token: string) {
 		await this.mailerService.sendMail({
@@ -16,15 +16,26 @@ export class EmailService {
 		});
 	}
 
-	async sendResetPassword(email: string, token: string) {
-		await this.mailerService.sendMail({
+	async sendResetPasswordEmail(email: string, resetToken: string) {
+		const resetUrl = `${process.env.FRONTEND_URL}/auth/reset-password?token=${resetToken}`;
+
+		const mailOptions = {
 			to: email,
-			subject: 'Đặt lại mật khẩu Lingora',
-			template: 'reset-password.hbs',
+			subject: 'Reset Password Request',
+			template: 'reset-password',
 			context: {
-				link: `https://lingora-fe.vercel.app/reset-password?token=${token}`,
-			},
-		});
+				resetUrl,
+				email
+			}
+		};
+
+		try {
+			await this.mailerService.sendMail(mailOptions);
+			console.log('Reset password email sent successfully');
+		} catch (error) {
+			console.error('Error sending reset password email:', error);
+			throw new Error('Failed to send reset password email');
+		}
 	}
 
 	async sendPaymentNotification(

@@ -17,6 +17,8 @@ import { Request, Response } from 'express';
 import { JwtRefreshTokenGuard } from './guards/jwt-refresh-token.guard';
 import { GoogleAuthGuard } from './guards/google.guard';
 import { ConfigService } from '@nestjs/config';
+import { ForgotPasswordDto } from './dto/forgot-password.dto';
+import { ResetPasswordDto } from './dto/reset-password.dto';
 
 export interface AuthRequest extends Request {
 	user: {
@@ -90,5 +92,19 @@ export class AuthController {
 		return this.authService.refreshTokens(userId, token);
 	}
 
+	//Forgot password
+	@Post('forgot-password')
+	@ApiOperation({ summary: 'Forgot password' })
+	@ApiResponse({ status: 200, description: 'Password reset email sent' })
+	async forgotPassword(@Body() forgotPasswordDto: ForgotPasswordDto) {
+		return this.authService.forgotPassword(forgotPasswordDto);
+	}
 
+	//Reset password
+	@Post('reset-password')
+	@ApiOperation({ summary: 'Reset password' })
+	@ApiResponse({ status: 200, description: 'Password reset successfully' })
+	async resetPassword(@Body() resetPasswordDto: ResetPasswordDto) {
+		return this.authService.resetPassword(resetPasswordDto);
+	}
 }
