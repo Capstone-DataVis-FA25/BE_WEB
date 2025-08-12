@@ -12,7 +12,6 @@ import {
 import { UsersService } from '../users/users.service';
 import { SignUpDto } from './dto/sign-up.dto';
 import { SignInDto } from './dto/sign-in.dto';
-import { UpdateProfileDto } from './dto/update-profile.dto';
 import { User } from '../../types/user.types';
 import { UserRole } from '../users/dto/create-user.dto';
 import { TokenPayload } from './interfaces/token.interface';
@@ -165,25 +164,6 @@ export class AuthService {
 
 	async signOut(userId: string): Promise<void> {
 		await this.usersService.removeRefreshToken(userId);
-	}
-
-	async updateProfile(userId: string, updateProfileDto: UpdateProfileDto): Promise<{ user: Partial<User> }> {
-		const updatedUser = await this.usersService.updateProfile(userId, updateProfileDto);
-
-		// Remove password from response
-		const { password, currentHashedRefreshToken, ...userResponse } = updatedUser;
-
-		return { user: userResponse };
-	}
-
-	async getProfile(userId: string): Promise<{ user: Partial<User> }> {
-		const user = await this.usersService.findOne(userId);
-
-		if (!user) {
-			throw new UnauthorizedException('User not found');
-		}
-
-		return { user };
 	}
 
 	private async generateTokens(userId: string, email: string): Promise<any> {

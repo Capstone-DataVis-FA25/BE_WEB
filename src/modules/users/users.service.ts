@@ -3,7 +3,6 @@ import { PrismaService } from '../../prisma/prisma.service';
 import { CreateUserDto, UserRole } from './dto/create-user.dto';
 import { UpdateUserDto } from './dto/update-user.dto';
 import { User, UserWithoutPassword } from '../../types/user.types';
-import { UpdateProfileDto } from '../auth/dto/update-profile.dto';
 import * as bcrypt from 'bcryptjs';
 import { ChangePasswordDTO } from './dto/change-password.dto';
 
@@ -130,35 +129,6 @@ export class UsersService {
 		});
 	}
 
-	// Update user profile
-	async updateProfile(userId: string, updateProfileDto: UpdateProfileDto): Promise<User> {
-		// Check if email is being updated and if it's already taken
-		if (updateProfileDto.email) {
-			const existingUser = await this.prisma.user.findUnique({
-				where: { 
-					email: updateProfileDto.email,
-					NOT: { id: userId }
-				}
-			});
-			
-			if (existingUser) {
-				throw new ConflictException('Email already exists');
-			}
-		}
-
-		// Update user profile
-		const updatedUser = await this.prisma.user.update({
-			where: { id: userId },
-			data: {
-				firstName: updateProfileDto.firstName,
-				lastName: updateProfileDto.lastName,
-				email: updateProfileDto.email,
-			},
-		});
-
-		return updatedUser as User;
-	}
-
 	// Change user password
 	async changePassword(userId : string, dto : ChangePasswordDTO){
 		const user = await this.prisma.user.findUnique({
@@ -184,5 +154,19 @@ export class UsersService {
 			where: { id: userId },
 			data: { password: hashedNewPassword },
 		});
+	}
+
+	// Update user profile
+	async updateProfile(userId: string, updateUserdto: UpdateUserDto): Promise<User> {
+		// Update user profile
+		const updatedUser = await this.prisma.user.update({
+			where: { id: userId },
+			data: {
+				firstName: updateUserdto.firstName,
+				lastName: updateUserdto.lastName,
+			},
+		});
+
+		return updatedUser as User;
 	}
 }
