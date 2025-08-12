@@ -10,17 +10,11 @@ datasource db {
   url      = env("DATABASE_URL")
 }
 
-// ====================================
-// ENUMS
-// ====================================
 enum UserRole {
   USER
   ADMIN
 }
 
-// ====================================
-// USER MANAGEMENT MODELS
-// ====================================
 model User {
   id        String   @id @default(cuid())
   email     String   @unique
@@ -29,6 +23,7 @@ model User {
   lastName  String?
   role      UserRole @default(USER)
   isActive  Boolean  @default(true)
+  isVerified Boolean @default(false)
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
 
@@ -36,4 +31,3 @@ model User {
 
   @@map("users")
 }
-

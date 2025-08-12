@@ -8,6 +8,7 @@ import {
 	Delete,
 	UseGuards,
 	Req,
+	Request,
 } from '@nestjs/common';
 import { ApiTags, ApiOperation, ApiResponse, ApiBearerAuth } from '@nestjs/swagger';
 import { UsersService } from './users.service';
@@ -17,13 +18,15 @@ import { JwtAccessTokenGuard } from '../auth/guards/jwt-access-token.guard';
 import { RolesGuard } from '../auth/guards/roles.guard';
 import { Roles } from 'src/decorators/auth.decorator';
 import { ForbiddenException } from '@nestjs/common';
+import { ChangePasswordDTO } from './dto/change-password.dto';
+import { AuthRequest } from '@modules/auth/auth.controller';
 
 
 @ApiTags('users')
 @ApiBearerAuth()
 @Controller('users')
 export class UsersController {
-	constructor(private readonly usersService: UsersService) {}
+	constructor(private readonly usersService: UsersService) { }
 
 	@Post()
 	@ApiOperation({ summary: 'Create a new user' })
@@ -44,6 +47,22 @@ export class UsersController {
 	@ApiResponse({ status: 200, description: 'User found' })
 	findOne(@Param('id') id: string) {
 		return this.usersService.findOne(id);
+	}
+
+	//Change password API
+	@Patch('me/change-password')
+	@ApiOperation({ summary: 'Change user password' })
+	@UseGuards(JwtAccessTokenGuard)
+	changePassword(@Request() req: AuthRequest, @Body() changePasswordDto: ChangePasswordDTO) {
+		return this.usersService.changePassword(req.user.userId, changePasswordDto);
+	}
+
+	//Update Profile
+	@Patch('me/update-profile')
+	@ApiOperation({ summary: 'Update user profile' })
+	@UseGuards(JwtAccessTokenGuard)
+	updateProfile(@Request() req: AuthRequest, @Body() updateProfileDto: UpdateUserDto) {
+		return this.usersService.updateProfile(req.user.userId, updateProfileDto);
 	}
 
 	@Patch(':id')
