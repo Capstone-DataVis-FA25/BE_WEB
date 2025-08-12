@@ -23,6 +23,8 @@ import {
 import * as fs from "fs";
 import { EmailService } from "../email/email.service";
 import { GoogleAuthService } from "./google-auth.service";
+import { ForgotPasswordDto } from "./dto/forgot-password.dto";
+import { ResetPasswordDto } from "./dto/reset-password.dto";
 
 export interface GoogleUser {
   email: string;
@@ -39,7 +41,7 @@ export class AuthService {
     private readonly jwtService: JwtService,
     private readonly emailService: EmailService,
     private readonly googleAuthService: GoogleAuthService
-  ) {}
+  ) { }
 
   async signUp(signUpDto: SignUpDto): Promise<{
     user: Partial<User>;
@@ -264,6 +266,59 @@ export class AuthService {
     return {
       access_token: accessToken,
       refresh_token: refreshToken,
+    };
+  }
+
+  async forgotPassword(forgotPasswordDto: ForgotPasswordDto) {
+    const { email } = forgotPasswordDto;
+
+    const user = await this.usersService.findByEmail(email);
+
+    if (!user) {
+      throw new Error("Email doesn't exist");
+    }
+
+    const resetToken = this.jwtService.sign(
+      { sub: user.id, email: user.email },
+      {
+        secret: access_token_private_key,
+        expiresIn: "30m",
+      }
+    );
+
+    await this.emailService.sendResetPasswordEmail(user.email, resetToken);
+
+    return {
+      message: 'Email reset password has been sent'
+    };
+  }
+
+  async resetPassword(resetPasswordDto: ResetPasswordDto) {
+    const { token, newPassword } = resetPasswordDto;
+    let payload : TokenPayload;
+    try {
+      payload = this.jwtService.verify(token, {
+        secret: access_token_private_key,
+      });
+    } catch (error) {
+      throw new Error("Token is invalid or has expired");
+    }
+
+    const user = await this.usersService.findByEmail(payload.email);
+    if (!user) {
+      throw new Error("User doesn't exist");
+    }
+
+    // Hash password mới
+    const hashedPassword = await bcrypt.hash(newPassword, 10);
+
+    // Cập nhật password
+    await this.usersService.update(user.id, {
+      password: hashedPassword,
+    });
+
+    return {
+      message: 'Password has been reset successfully'
     };
   }
 }
