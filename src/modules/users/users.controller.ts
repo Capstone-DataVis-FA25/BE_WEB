@@ -7,6 +7,7 @@ import {
 	Param,
 	Delete,
 	UseGuards,
+	Req,
 } from '@nestjs/common';
 import { ApiTags, ApiOperation, ApiResponse, ApiBearerAuth } from '@nestjs/swagger';
 import { UsersService } from './users.service';
@@ -15,9 +16,11 @@ import { UpdateUserDto } from './dto/update-user.dto';
 import { JwtAccessTokenGuard } from '../auth/guards/jwt-access-token.guard';
 import { RolesGuard } from '../auth/guards/roles.guard';
 import { Roles } from 'src/decorators/auth.decorator';
+import { ForbiddenException } from '@nestjs/common';
 
 
 @ApiTags('users')
+@ApiBearerAuth()
 @Controller('users')
 export class UsersController {
 	constructor(private readonly usersService: UsersService) {}
@@ -50,15 +53,18 @@ export class UsersController {
 		return this.usersService.update(id, updateUserDto);
 	}
 
-	@UseGuards(JwtAccessTokenGuard, RolesGuard)
-	@Roles(UserRole.ADMIN)
+	@UseGuards(JwtAccessTokenGuard)
 	@Delete(':id')
 	@ApiBearerAuth()
-	@ApiOperation({ summary: 'Delete user by ID (Admin only)' })
 	@ApiResponse({ status: 200, description: 'User deleted successfully' })
-	@ApiResponse({ status: 403, description: 'Insufficient permissions - Admin role required' })
+	@ApiResponse({ status: 403, description: 'Forbidden: You can only delete your own account or must be admin' })
 	@ApiResponse({ status: 404, description: 'User not found' })
-	remove(@Param('id') id: string) {
+	async remove(@Param('id') id: string, @Body() body: any, @Req() req: any) {
+		const userIdFromToken = req.user.sub;
+		const userRole = req.user.role;
+		if (userIdFromToken !== id && userRole !== UserRole.ADMIN) {
+			throw new ForbiddenException('You can only delete your own account or must be admin');
+		}
 		return this.usersService.remove(id);
 	}
 }

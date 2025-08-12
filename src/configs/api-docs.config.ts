@@ -12,7 +12,7 @@ export function configSwagger(app: INestApplication) {
 		.setTitle('Data Vis project')
 		.setDescription('## The Data Vis API description')
 		.setVersion('1.0')
-		.addSecurity('token', { type: 'http', scheme: 'bearer' })
+		.addBearerAuth()
 		.build();
 	const document = SwaggerModule.createDocument(app, config);
 
