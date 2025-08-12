@@ -130,7 +130,7 @@ export class UsersService {
 		});
 	}
 
-<<<<<<< HEAD
+	// Update user profile
 	async updateProfile(userId: string, updateProfileDto: UpdateProfileDto): Promise<User> {
 		// Check if email is being updated and if it's already taken
 		if (updateProfileDto.email) {
@@ -157,7 +157,9 @@ export class UsersService {
 		});
 
 		return updatedUser as User;
-=======
+	}
+
+	// Change user password
 	async changePassword(userId : string, dto : ChangePasswordDTO){
 		const user = await this.prisma.user.findUnique({
 			where: { id: userId },
@@ -182,6 +184,5 @@ export class UsersService {
 			where: { id: userId },
 			data: { password: hashedNewPassword },
 		});
->>>>>>> ca24cf99317381adaa5a281688ce1652e42a2865
 	}
 }
