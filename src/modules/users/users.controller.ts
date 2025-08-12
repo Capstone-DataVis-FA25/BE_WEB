@@ -52,6 +52,14 @@ export class UsersController {
 		return this.usersService.changePassword(req.user.userId, changePasswordDto);
 	}
 
+	//Update Profile
+	@Patch('me/update-profile')
+	@ApiOperation({ summary: 'Update user profile' })
+	@UseGuards(JwtAccessTokenGuard)
+	updateProfile(@Request() req: AuthRequest, @Body() updateProfileDto: UpdateUserDto) {
+		return this.usersService.updateProfile(req.user.userId, updateProfileDto);
+	}
+
 	@Patch(':id')
 	@ApiOperation({ summary: 'Update user by ID' })
 	@ApiResponse({ status: 200, description: 'User updated successfully' })

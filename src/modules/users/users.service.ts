@@ -129,6 +129,7 @@ export class UsersService {
 		});
 	}
 
+	// Change user password
 	async changePassword(userId : string, dto : ChangePasswordDTO){
 		const user = await this.prisma.user.findUnique({
 			where: { id: userId },
@@ -153,5 +154,19 @@ export class UsersService {
 			where: { id: userId },
 			data: { password: hashedNewPassword },
 		});
+	}
+
+	// Update user profile
+	async updateProfile(userId: string, updateUserdto: UpdateUserDto): Promise<{user: User}> {
+		// Update user profile
+		const updatedUser = await this.prisma.user.update({
+			where: { id: userId },
+			data: {
+				firstName: updateUserdto.firstName,
+				lastName: updateUserdto.lastName,
+			},
+		});
+
+		return {user: updatedUser};
 	}
 }
