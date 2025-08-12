@@ -17,7 +17,6 @@ import { UserRole } from '../users/dto/create-user.dto';
 import { TokenPayload } from './interfaces/token.interface';
 import {
 	access_token_private_key,
-	access_token_public_key,
 	refresh_token_private_key,
 } from 'src/constraints/jwt.constraint';
 import { EmailService } from '@modules/email/email.service';
@@ -178,11 +177,11 @@ export class AuthService {
       console.log("Verifying token:", token.substring(0, 50) + "...");
       console.log(
         "Using public key:",
-        access_token_public_key.substring(0, 100) + "..."
+        access_token_private_key.substring(0, 100) + "..."
       );
 
       const payload = this.jwtService.verify(token, {
-        publicKey: access_token_public_key, 
+        publicKey: access_token_private_key, 
         algorithms: ["RS256"],
       });
 

@@ -5,7 +5,7 @@ import { ExtractJwt, Strategy } from "passport-jwt";
 
 import { AuthService } from "../auth.service";
 import { TokenPayload } from "../interfaces/token.interface";
-import { refresh_token_public_key } from "src/constraints/jwt.constraint";
+import { refresh_token_private_key } from "src/constraints/jwt.constraint";
 import { UsersService } from "../../users/users.service";
 
 @Injectable()
@@ -17,8 +17,8 @@ export class JwtRefreshTokenStrategy extends PassportStrategy(
     super({
       jwtFromRequest: ExtractJwt.fromAuthHeaderAsBearerToken(),
       ignoreExpiration: false,
-      secretOrKey: refresh_token_public_key,
-      algorithms: ["RS256"],
+      secretOrKey: refresh_token_private_key,
+      algorithms: ["HS256"],
       passReqToCallback: true,
     });
   }
