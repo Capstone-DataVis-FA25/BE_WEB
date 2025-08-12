@@ -1,187 +1,269 @@
-import * as bcrypt from 'bcryptjs';
-import { ConfigService } from '@nestjs/config';
-import { JwtService } from '@nestjs/jwt';
+import * as bcrypt from "bcryptjs";
+import { ConfigService } from "@nestjs/config";
+import { JwtService } from "@nestjs/jwt";
 import {
-	BadRequestException,
-	ConflictException,
-	Injectable,
-	UnauthorizedException,
-	HttpException,
-	HttpStatus,
-} from '@nestjs/common';
-import { UsersService } from '../users/users.service';
-import { SignUpDto } from './dto/sign-up.dto';
-import { SignInDto } from './dto/sign-in.dto';
-import { User } from '../../types/user.types';
-import { UserRole } from '../users/dto/create-user.dto';
-import { TokenPayload } from './interfaces/token.interface';
+  BadRequestException,
+  ConflictException,
+  Injectable,
+  UnauthorizedException,
+  HttpException,
+  HttpStatus,
+} from "@nestjs/common";
+import { UsersService } from "../users/users.service";
+import { SignUpDto } from "./dto/sign-up.dto";
+import { SignInDto } from "./dto/sign-in.dto";
+import { User } from "../../types/user.types";
+import { UserRole } from "../users/dto/create-user.dto";
+import { TokenPayload } from "./interfaces/token.interface";
 import {
-	access_token_private_key,
-	refresh_token_private_key,
-} from 'src/constraints/jwt.constraint';
-import { GoogleAuthService } from './google-auth.service';
+  access_token_private_key,
+  access_token_public_key,
+  refresh_token_private_key,
+} from "src/constraints/jwt.constraint";
+import * as fs from "fs";
+import { EmailService } from "../email/email.service";
+import { GoogleAuthService } from "./google-auth.service";
 
 export interface GoogleUser {
-	email: string;
-	firstName?: string;
-	lastName?: string;
-	picture?: string;
+  email: string;
+  firstName?: string;
+  lastName?: string;
+  picture?: string;
 }
 
 @Injectable()
 export class AuthService {
-	constructor(
-		private readonly configService: ConfigService,
-		private readonly usersService: UsersService,
-		private readonly jwtService: JwtService,
-		private readonly googleAuthService: GoogleAuthService,
-	) { }
+  constructor(
+    private readonly configService: ConfigService,
+    private readonly usersService: UsersService,
+    private readonly jwtService: JwtService,
+    private readonly emailService: EmailService,
+    private readonly googleAuthService: GoogleAuthService
+  ) {}
 
-	async signUp(signUpDto: SignUpDto): Promise<{ user: Partial<User>; tokens: any }> {
-		// Check if user exists
-		const existingUser = await this.usersService.findByEmail(signUpDto.email);
-		if (existingUser) {
-			throw new ConflictException('User with this email already exists');
-		}
+  async signUp(signUpDto: SignUpDto): Promise<{
+    user: Partial<User>;
+    tokens: any;
+    message: string;
+    verifyToken?: string;
+  }> {
+    // Check if user exists
+    const existingUser = await this.usersService.findByEmail(signUpDto.email);
+    if (existingUser) {
+      throw new ConflictException("User with this email already exists");
+    }
 
-		// Create user
-		const user = await this.usersService.create({
-			...signUpDto,
-			role: UserRole.USER,
-		});
+    // Create user
+    const user = await this.usersService.create({
+      ...signUpDto,
+      role: UserRole.USER,
+    });
 
-		// Generate tokens
-		const tokens = await this.generateTokens(user.id, user.email);
+    // Generate tokens
+    const tokens = await this.generateTokens(user.id, user.email);
 
-		// Save refresh token
-		await this.usersService.updateRefreshToken(user.id, tokens.refresh_token);
+    // Dùng RSA private key cho verify email token
+    const verifyToken = this.jwtService.sign(
+      { sub: user.id, email: user.email },
+      {
+        privateKey: access_token_private_key,
+        expiresIn: "30m",
+        algorithm: "RS256",
+      }
+    );
 
-		// Remove password from response
-		const { password, ...userResponse } = user;
+    // Send verify email
+    await this.emailService.sendEmailVerification(user.email, verifyToken);
 
-		return { user: userResponse, tokens };
-	}
+    // Save refresh token
+    await this.usersService.updateRefreshToken(user.id, tokens.refresh_token);
 
-	async signIn(signInDto: SignInDto): Promise<{ user: Partial<User>; tokens: any }> {
-		const user = await this.validateUser(signInDto.email, signInDto.password);
-		if (!user) {
-			throw new UnauthorizedException('Invalid credentials');
-		}
+    // Remove password from response
+    const { password, ...userResponse } = user;
 
-		if (!user.isActive) {
-			throw new UnauthorizedException('Account is deactivated');
-		}
+    return {
+      user: userResponse,
+      tokens,
+      verifyToken: verifyToken,
+      message: "Email verification send success! Check mail",
+    };
+  }
 
-		const tokens = await this.generateTokens(user.id, user.email);
-		await this.usersService.updateRefreshToken(user.id, tokens.refresh_token);
+  async signIn(
+    signInDto: SignInDto
+  ): Promise<{ user: Partial<User>; tokens: any }> {
+    const user = await this.validateUser(signInDto.email, signInDto.password);
+    if (!user) {
+      throw new UnauthorizedException("Invalid credentials");
+    }
 
-		// Remove password from response
-		const { password, ...userResponse } = user;
+    if (!user.isActive) {
+      throw new UnauthorizedException("Account is deactivated");
+    }
 
-		return { user: userResponse, tokens };
-	}
+    if (!user.isVerified) {
+      throw new UnauthorizedException(
+        "Account is not verify ! Please check mail"
+      );
+    }
 
-	async authenticateWithGoogle(googleToken: string): Promise<{ user: Partial<User>; tokens: any }> {
-		try {
-			// Verify Google token with Google's servers
-			const googlePayload = await this.googleAuthService.verifyGoogleToken(googleToken);
+    const tokens = await this.generateTokens(user.id, user.email);
+    await this.usersService.updateRefreshToken(user.id, tokens.refresh_token);
 
-			// Find or create user
-			const user = await this.googleAuthService.findOrCreateGoogleUser(googlePayload);
+    // Remove password from response
+    const { password, ...userResponse } = user;
 
-			if (!user.isActive) {
-				throw new HttpException(
-					{ message: 'Account is deactivated', error: 'Unauthorized' },
-					HttpStatus.UNAUTHORIZED,
-				);
-			}
+    return { user: userResponse, tokens };
+  }
 
-			const tokens = await this.generateTokens(user.id, user.email);
-			await this.usersService.updateRefreshToken(user.id, tokens.refresh_token);
+  async authenticateWithGoogle(
+    googleToken: string
+  ): Promise<{ user: Partial<User>; tokens: any }> {
+    try {
+      // Verify Google token with Google's servers
+      const googlePayload =
+        await this.googleAuthService.verifyGoogleToken(googleToken);
 
-			// Remove password from response
-			const { password, ...userResponse } = user;
+      // Find or create user
+      const user =
+        await this.googleAuthService.findOrCreateGoogleUser(googlePayload);
 
-			return { user: userResponse, tokens };
+      if (!user.isActive) {
+        throw new HttpException(
+          { message: "Account is deactivated", error: "Unauthorized" },
+          HttpStatus.UNAUTHORIZED
+        );
+      }
 
-		} catch (error) {
-			throw new BadRequestException({
-				statusCode: HttpStatus.INTERNAL_SERVER_ERROR,
-				error: error.message,
-				message: 'Có lỗi xảy ra với Google authentication, vui lòng thử lại sau',
-			});
-		}
-	}
+      const tokens = await this.generateTokens(user.id, user.email);
+      await this.usersService.updateRefreshToken(user.id, tokens.refresh_token);
 
-	async authenticateWithGoogleUser(googleUser: any): Promise<{ user: Partial<User>; tokens: any }> {
-		try {
-			// Find or create user
-			const user = await this.googleAuthService.findOrCreateGoogleUser(googleUser);
+      // Remove password from response
+      const { password, ...userResponse } = user;
 
-			if (!user.isActive) {
-				throw new HttpException(
-					{ message: 'Account is deactivated', error: 'Unauthorized' },
-					HttpStatus.UNAUTHORIZED,
-				);
-			}
+      return { user: userResponse, tokens };
+    } catch (error) {
+      throw new BadRequestException({
+        statusCode: HttpStatus.INTERNAL_SERVER_ERROR,
+        error: error.message,
+        message:
+          "Có lỗi xảy ra với Google authentication, vui lòng thử lại sau",
+      });
+    }
+  }
 
-			const tokens = await this.generateTokens(user.id, user.email);
-			await this.usersService.updateRefreshToken(user.id, tokens.refresh_token);
+  async authenticateWithGoogleUser(
+    googleUser: any
+  ): Promise<{ user: Partial<User>; tokens: any }> {
+    try {
+      // Find or create user
+      const user =
+        await this.googleAuthService.findOrCreateGoogleUser(googleUser);
 
-			// Remove password from response
-			const { password, ...userResponse } = user;
+      if (!user.isActive) {
+        throw new HttpException(
+          { message: "Account is deactivated", error: "Unauthorized" },
+          HttpStatus.UNAUTHORIZED
+        );
+      }
 
-			return { user: userResponse, tokens };
+      const tokens = await this.generateTokens(user.id, user.email);
+      await this.usersService.updateRefreshToken(user.id, tokens.refresh_token);
 
-		} catch (error) {
-			throw new BadRequestException({
-				statusCode: HttpStatus.INTERNAL_SERVER_ERROR,
-				error: error.message,
-				message: 'Có lỗi xảy ra với Google authentication, vui lòng thử lại sau',
-			});
-		}
-	}
+      // Remove password from response
+      const { password, ...userResponse } = user;
 
-	async validateUser(email: string, password: string): Promise<User | null> {
-		const user = await this.usersService.findByEmail(email);
-		if (user && await bcrypt.compare(password, user.password)) {
-			return user;
-		}
-		return null;
-	}
+      return { user: userResponse, tokens };
+    } catch (error) {
+      throw new BadRequestException({
+        statusCode: HttpStatus.INTERNAL_SERVER_ERROR,
+        error: error.message,
+        message:
+          "Có lỗi xảy ra với Google authentication, vui lòng thử lại sau",
+      });
+    }
+  }
 
-	async refreshTokens(userId: string, refreshToken: string): Promise<any> {
-		const user = await this.usersService.getUserIfRefreshTokenMatches(refreshToken, userId);
-		if (!user) {
-			throw new UnauthorizedException('Invalid refresh token');
-		}
+  async validateUser(email: string, password: string): Promise<User | null> {
+    const user = await this.usersService.findByEmail(email);
+    if (user && (await bcrypt.compare(password, user.password))) {
+      return user;
+    }
+    return null;
+  }
 
-		const tokens = await this.generateTokens(user.id, user.email);
-		await this.usersService.updateRefreshToken(user.id, tokens.refresh_token);
+  async refreshTokens(userId: string, refreshToken: string): Promise<any> {
+    const user = await this.usersService.getUserIfRefreshTokenMatches(
+      refreshToken,
+      userId
+    );
+    if (!user) {
+      throw new UnauthorizedException("Invalid refresh token");
+    }
 
-		return tokens;
-	}
+    const tokens = await this.generateTokens(user.id, user.email);
+    await this.usersService.updateRefreshToken(user.id, tokens.refresh_token);
 
-	async signOut(userId: string): Promise<void> {
-		await this.usersService.removeRefreshToken(userId);
-	}
+    return tokens;
+  }
 
-	private async generateTokens(userId: string, email: string): Promise<any> {
-		const payload: TokenPayload = { sub: userId, email };
+  async verifyEmail(token: string): Promise<any> {
+    try {
+      console.log("Verifying token:", token.substring(0, 50) + "...");
+      console.log(
+        "Using public key:",
+        access_token_public_key.substring(0, 100) + "..."
+      );
 
-		const accessToken = this.jwtService.sign(payload, {
-			secret: access_token_private_key,
-			expiresIn: `${this.configService.get('jwt.access_token_expiration_time')}s`,
-		});
+      // Giải mã token với RSA public key
+      const payload = this.jwtService.verify(token, {
+        publicKey: access_token_public_key, // Sử dụng public key đúng
+        algorithms: ["RS256"],
+      });
 
-		const refreshToken = this.jwtService.sign(payload, {
-			secret: refresh_token_private_key,
-			expiresIn: `${this.configService.get('jwt.refresh_token_expiration_time')}s`,
-		});
+      console.log("Token payload:", payload);
 
-		return {
-			access_token: accessToken,
-			refresh_token: refreshToken,
-		};
-	}
+      const userId = payload.sub;
+      const user = await this.usersService.findByEmail(payload.email);
+      if (!user) {
+        throw new BadRequestException("User not found");
+      }
+      if (user.isVerified) {
+        return { message: "Email đã được xác thực trước đó." };
+      }
+      // Cập nhật trạng thái xác thực
+      await this.usersService.update(userId, { isVerified: true });
+      return { message: "Xác thực email thành công." };
+    } catch (error) {
+      console.error("Token verification error:", error);
+      throw new BadRequestException(
+        "Token xác thực không hợp lệ hoặc đã hết hạn"
+      );
+    }
+  }
+
+  async signOut(userId: string): Promise<void> {
+    await this.usersService.removeRefreshToken(userId);
+  }
+
+  private async generateTokens(userId: string, email: string): Promise<any> {
+    const payload: TokenPayload = { sub: userId, email };
+
+    const accessToken = this.jwtService.sign(payload, {
+      privateKey: access_token_private_key,
+      expiresIn: `${this.configService.get("JWT_ACCESS_TOKEN_EXPIRATION_TIME")}s`,
+      algorithm: "RS256",
+    });
+
+    const refreshToken = this.jwtService.sign(payload, {
+      privateKey: refresh_token_private_key,
+      expiresIn: `${this.configService.get("JWT_REFRESH_TOKEN_EXPIRATION_TIME")}s`,
+      algorithm: "RS256",
+    });
+
+    return {
+      access_token: accessToken,
+      refresh_token: refreshToken,
+    };
+  }
 }
