@@ -247,7 +247,7 @@ export class AuthService {
     const user = await this.usersService.findByEmail(email);
 
     if (!user) {
-      throw new Error('Email không tồn tại trong hệ thống');
+      throw new Error("Email doesn't exist");
     }
 
     const resetToken = this.jwtService.sign(
@@ -261,24 +261,24 @@ export class AuthService {
     await this.emailService.sendResetPasswordEmail(user.email, resetToken);
 
     return {
-      message: 'Email reset password đã được gửi'
+      message: 'Email reset password has been sent'
     };
   }
 
   async resetPassword(resetPasswordDto: ResetPasswordDto) {
     const { token, newPassword } = resetPasswordDto;
-    let payload;
+    let payload : TokenPayload;
     try {
       payload = this.jwtService.verify(token, {
         secret: access_token_private_key,
       });
     } catch (error) {
-      throw new Error("Token không hợp lệ hoặc đã hết hạn");
+      throw new Error("Token is invalid or has expired");
     }
 
     const user = await this.usersService.findByEmail(payload.email);
     if (!user) {
-      throw new Error("User không tồn tại");
+      throw new Error("User doesn't exist");
     }
 
     // Hash password mới
@@ -290,7 +290,7 @@ export class AuthService {
     });
 
     return {
-      message: 'Mật khẩu đã được reset thành công'
+      message: 'Password has been reset successfully'
     };
   }
 }
