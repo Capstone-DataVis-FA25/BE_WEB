@@ -17,8 +17,10 @@ import { UserRole } from "../users/dto/create-user.dto";
 import { TokenPayload } from "./interfaces/token.interface";
 import {
   access_token_private_key,
+  access_token_public_key,
   refresh_token_private_key,
 } from "src/constraints/jwt.constraint";
+import * as fs from "fs";
 import { EmailService } from "../email/email.service";
 import { GoogleAuthService } from "./google-auth.service";
 
@@ -39,9 +41,12 @@ export class AuthService {
     private readonly googleAuthService: GoogleAuthService
   ) {}
 
-  async signUp(
-    signUpDto: SignUpDto
-  ): Promise<{ user: Partial<User>; tokens: any }> {
+  async signUp(signUpDto: SignUpDto): Promise<{
+    user: Partial<User>;
+    tokens: any;
+    message: string;
+    verifyToken?: string;
+  }> {
     // Check if user exists
     const existingUser = await this.usersService.findByEmail(signUpDto.email);
     if (existingUser) {
@@ -57,20 +62,18 @@ export class AuthService {
     // Generate tokens
     const tokens = await this.generateTokens(user.id, user.email);
 
-    // Generate verify email token
+    // Dùng RSA private key cho verify email token
     const verifyToken = this.jwtService.sign(
       { sub: user.id, email: user.email },
       {
-        secret: this.configService.get("jwt.access_token_private_key"),
+        privateKey: access_token_private_key,
         expiresIn: "30m",
+        algorithm: "RS256",
       }
     );
 
-    // Generate verify link
-    const verifyLink = `${this.configService.get("frontend_url")}/verify-email?token=${verifyToken}`;
-
     // Send verify email
-    await this.emailService.sendEmailVerification(user.email, verifyLink);
+    await this.emailService.sendEmailVerification(user.email, verifyToken);
 
     // Save refresh token
     await this.usersService.updateRefreshToken(user.id, tokens.refresh_token);
@@ -78,7 +81,12 @@ export class AuthService {
     // Remove password from response
     const { password, ...userResponse } = user;
 
-    return { user: userResponse, tokens };
+    return {
+      user: userResponse,
+      tokens,
+      verifyToken: verifyToken,
+      message: "Email verification send success! Check mail",
+    };
   }
 
   async signIn(
@@ -92,6 +100,13 @@ export class AuthService {
     if (!user.isActive) {
       throw new UnauthorizedException("Account is deactivated");
     }
+
+    if (!user.isVerified) {
+      throw new UnauthorizedException(
+        "Account is not verify ! Please check mail"
+      );
+    }
+
     const tokens = await this.generateTokens(user.id, user.email);
     await this.usersService.updateRefreshToken(user.id, tokens.refresh_token);
 
@@ -194,10 +209,20 @@ export class AuthService {
 
   async verifyEmail(token: string): Promise<any> {
     try {
-      // Giải mã token
+      console.log("Verifying token:", token.substring(0, 50) + "...");
+      console.log(
+        "Using public key:",
+        access_token_public_key.substring(0, 100) + "..."
+      );
+
+      // Giải mã token với RSA public key
       const payload = this.jwtService.verify(token, {
-        secret: this.configService.get("jwt.access_token_private_key"),
+        publicKey: access_token_public_key, // Sử dụng public key đúng
+        algorithms: ["RS256"],
       });
+
+      console.log("Token payload:", payload);
+
       const userId = payload.sub;
       const user = await this.usersService.findByEmail(payload.email);
       if (!user) {
@@ -210,6 +235,7 @@ export class AuthService {
       await this.usersService.update(userId, { isVerified: true });
       return { message: "Xác thực email thành công." };
     } catch (error) {
+      console.error("Token verification error:", error);
       throw new BadRequestException(
         "Token xác thực không hợp lệ hoặc đã hết hạn"
       );
@@ -224,13 +250,15 @@ export class AuthService {
     const payload: TokenPayload = { sub: userId, email };
 
     const accessToken = this.jwtService.sign(payload, {
-      secret: access_token_private_key,
-      expiresIn: `${this.configService.get("jwt.access_token_expiration_time")}s`,
+      privateKey: access_token_private_key,
+      expiresIn: `${this.configService.get("JWT_ACCESS_TOKEN_EXPIRATION_TIME")}s`,
+      algorithm: "RS256",
     });
 
     const refreshToken = this.jwtService.sign(payload, {
-      secret: refresh_token_private_key,
-      expiresIn: `${this.configService.get("jwt.refresh_token_expiration_time")}s`,
+      privateKey: refresh_token_private_key,
+      expiresIn: `${this.configService.get("JWT_REFRESH_TOKEN_EXPIRATION_TIME")}s`,
+      algorithm: "RS256",
     });
 
     return {
