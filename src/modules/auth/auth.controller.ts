@@ -2,7 +2,6 @@ import {
 	Body,
 	Controller,
 	Post,
-	Put,
 	Get,
 	HttpCode,
 	HttpStatus,
@@ -13,10 +12,9 @@ import {
 import { AuthService } from './auth.service';
 import { SignInDto } from './dto/sign-in.dto';
 import { SignUpDto } from './dto/sign-up.dto';
-import { ApiTags, ApiOperation, ApiResponse, ApiBearerAuth } from '@nestjs/swagger';
+import { ApiTags, ApiOperation, ApiResponse } from '@nestjs/swagger';
 import { Request, Response } from 'express';
 import { JwtRefreshTokenGuard } from './guards/jwt-refresh-token.guard';
-import { JwtAccessTokenGuard } from './guards/jwt-access-token.guard';
 import { GoogleAuthGuard } from './guards/google.guard';
 import { ConfigService } from '@nestjs/config';
 
@@ -90,18 +88,6 @@ export class AuthController {
 		const userId = req.user.userId || req.user.sub;
 		const token = req.user.refreshToken || refreshToken;
 		return this.authService.refreshTokens(userId, token);
-	}
-
-	@Post('logout')
-	@UseGuards(JwtAccessTokenGuard)
-	@ApiBearerAuth()
-	@HttpCode(HttpStatus.OK)
-	@ApiOperation({ summary: 'User logout' })
-	@ApiResponse({ status: 200, description: 'User logged out successfully' })
-	async logout(@Req() req: AuthRequest) {
-		const userId = req.user.sub;
-		await this.authService.signOut(userId);
-		return { message: 'Logged out successfully' };
 	}
 
 }
