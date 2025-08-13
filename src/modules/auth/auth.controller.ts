@@ -1,23 +1,25 @@
 import {
-  Body,
-  Controller,
-  Post,
-  Get,
-  HttpCode,
-  HttpStatus,
-  UseGuards,
-  Req,
-  Res,
+	Body,
+	Controller,
+	Post,
+	Get,
+	HttpCode,
+	HttpStatus,
+	UseGuards,
+	Req,
+	Res,
   Query,
-} from "@nestjs/common";
-import { AuthService } from "./auth.service";
-import { SignInDto } from "./dto/sign-in.dto";
-import { SignUpDto } from "./dto/sign-up.dto";
-import { ApiTags, ApiOperation, ApiResponse } from "@nestjs/swagger";
-import { Request, Response } from "express";
-import { JwtRefreshTokenGuard } from "./guards/jwt-refresh-token.guard";
-import { GoogleAuthGuard } from "./guards/google.guard";
-import { ConfigService } from "@nestjs/config";
+} from '@nestjs/common';
+import { AuthService } from './auth.service';
+import { SignInDto } from './dto/sign-in.dto';
+import { SignUpDto } from './dto/sign-up.dto';
+import { ApiTags, ApiOperation, ApiResponse } from '@nestjs/swagger';
+import { Request, Response } from 'express';
+import { JwtRefreshTokenGuard } from './guards/jwt-refresh-token.guard';
+import { GoogleAuthGuard } from './guards/google.guard';
+import { ConfigService } from '@nestjs/config';
+import { ForgotPasswordDto } from './dto/forgot-password.dto';
+import { ResetPasswordDto } from './dto/reset-password.dto';
 
 export interface AuthRequest extends Request {
   user: {
@@ -80,7 +82,21 @@ export class AuthController {
   authenticateWithGoogleToken(@Body("idToken") idToken: string) {
     return this.authService.authenticateWithGoogle(idToken);
   }
+	//Forgot password
+	@Post('forgot-password')
+	@ApiOperation({ summary: 'Forgot password' })
+	@ApiResponse({ status: 200, description: 'Password reset email sent' })
+	async forgotPassword(@Body() forgotPasswordDto: ForgotPasswordDto) {
+		return this.authService.forgotPassword(forgotPasswordDto);
+	}
 
+	//Reset password
+	@Post('reset-password')
+	@ApiOperation({ summary: 'Reset password' })
+	@ApiResponse({ status: 200, description: 'Password reset successfully' })
+	async resetPassword(@Body() resetPasswordDto: ResetPasswordDto) {
+		return this.authService.resetPassword(resetPasswordDto);
+	}
   @UseGuards(JwtRefreshTokenGuard)
   @Post("refresh")
   @ApiOperation({ summary: "Refresh access token" })
@@ -107,3 +123,5 @@ export class AuthController {
     );
   }
 }
+
+

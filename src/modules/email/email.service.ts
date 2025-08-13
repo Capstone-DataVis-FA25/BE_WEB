@@ -4,10 +4,32 @@ import { ConfigService } from "@nestjs/config";
 
 @Injectable()
 export class EmailService {
-  constructor(
+	  constructor(
     private readonly mailerService: MailerService,
     private readonly configService: ConfigService
   ) {}
+
+	async sendResetPasswordEmail(email: string, resetToken: string) {
+		const resetUrl = `${process.env.FRONTEND_URL}/auth/reset-password?token=${resetToken}`;
+
+		const mailOptions = {
+			to: email,
+			subject: 'Reset Password Request',
+			template: 'reset-password',
+			context: {
+				resetUrl,
+				email
+			}
+		};
+
+		try {
+			await this.mailerService.sendMail(mailOptions);
+			console.log('Reset password email sent successfully');
+		} catch (error) {
+			console.error('Error sending reset password email:', error);
+			throw new Error('Failed to send reset password email');
+		}
+	}
 
   async sendEmailVerification(email: string, token: string) {
     await this.mailerService.sendMail({
