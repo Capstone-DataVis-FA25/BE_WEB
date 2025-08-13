@@ -62,15 +62,8 @@ export class AuthService {
     // Generate tokens
     const tokens = await this.generateTokens(user.id, user.email);
 
-    // Dùng RSA private key cho verify email token
-    const verifyToken = this.jwtService.sign(
-      { sub: user.id, email: user.email },
-      {
-        privateKey: access_token_private_key,
-        expiresIn: "30m",
-        algorithm: "RS256",
-      }
-    );
+    // Generate verify token using dedicated method
+    const verifyToken = await this.generateVerifyToken(user.id, user.email);
 
     // Send verify email
     await this.emailService.sendEmailVerification(user.email, verifyToken);
@@ -217,13 +210,10 @@ export class AuthService {
 
       // Giải mã token với RSA public key
       const payload = this.jwtService.verify(token, {
-        publicKey: access_token_public_key, // Sử dụng public key đúng
+        publicKey: access_token_public_key,
         algorithms: ["RS256"],
       });
 
-      console.log("Token payload:", payload);
-
-      const userId = payload.sub;
       const user = await this.usersService.findByEmail(payload.email);
       if (!user) {
         throw new BadRequestException("User not found");
@@ -231,11 +221,9 @@ export class AuthService {
       if (user.isVerified) {
         return { message: "Email đã được xác thực trước đó." };
       }
-      // Cập nhật trạng thái xác thực
-      await this.usersService.update(userId, { isVerified: true });
+      await this.usersService.update(user.id, { isVerified: true });
       return { message: "Xác thực email thành công." };
     } catch (error) {
-      console.error("Token verification error:", error);
       throw new BadRequestException(
         "Token xác thực không hợp lệ hoặc đã hết hạn"
       );
@@ -265,5 +253,20 @@ export class AuthService {
       access_token: accessToken,
       refresh_token: refreshToken,
     };
+  }
+
+  private async generateVerifyToken(
+    userId: string,
+    email: string
+  ): Promise<any> {
+    const payload: TokenPayload = { sub: userId, email };
+
+    const verifyToken = this.jwtService.sign(payload, {
+      privateKey: access_token_private_key,
+      expiresIn: "30m",
+      algorithm: "RS256",
+    });
+
+    return verifyToken;
   }
 }
