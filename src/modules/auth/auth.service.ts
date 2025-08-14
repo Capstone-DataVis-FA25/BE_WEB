@@ -313,15 +313,14 @@ export class AuthService {
       throw new Error("User doesn't exist");
     }
 
-    // Hash password mới
-    const hashedPassword = await bcrypt.hash(newPassword, 10);
-    console.log("New password: ", newPassword);
-    console.log("Password hashed: ", hashedPassword);
-
-    // Cập nhật password
+    // Cập nhật password - hash bên trong hàm update
     await this.usersService.update(user.id, {
-      password: hashedPassword,
+      password: newPassword,
     });
+
+    const currentUser = await this.usersService.findOne(user.id);
+
+    console.log(`Current User: ${currentUser.firstName}`);
 
     return {
       message: "Password has been reset successfully",
