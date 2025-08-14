@@ -1,24 +1,25 @@
 import {
-	Body,
-	Controller,
-	Post,
-	Get,
-	HttpCode,
-	HttpStatus,
-	UseGuards,
-	Req,
-	Res,
-} from '@nestjs/common';
-import { AuthService } from './auth.service';
-import { SignInDto } from './dto/sign-in.dto';
-import { SignUpDto } from './dto/sign-up.dto';
-import { ApiTags, ApiOperation, ApiResponse } from '@nestjs/swagger';
-import { Request, Response } from 'express';
-import { JwtRefreshTokenGuard } from './guards/jwt-refresh-token.guard';
-import { GoogleAuthGuard } from './guards/google.guard';
-import { ConfigService } from '@nestjs/config';
-import { ForgotPasswordDto } from './dto/forgot-password.dto';
-import { ResetPasswordDto } from './dto/reset-password.dto';
+  Body,
+  Controller,
+  Post,
+  Get,
+  HttpCode,
+  HttpStatus,
+  UseGuards,
+  Req,
+  Res,
+  Query,
+} from "@nestjs/common";
+import { AuthService } from "./auth.service";
+import { SignInDto } from "./dto/sign-in.dto";
+import { SignUpDto } from "./dto/sign-up.dto";
+import { ApiTags, ApiOperation, ApiResponse } from "@nestjs/swagger";
+import { Request, Response } from "express";
+import { JwtRefreshTokenGuard } from "./guards/jwt-refresh-token.guard";
+import { GoogleAuthGuard } from "./guards/google.guard";
+import { ConfigService } from "@nestjs/config";
+import { ForgotPasswordDto } from "./dto/forgot-password.dto";
+import { ResetPasswordDto } from "./dto/reset-password.dto";
 
 export interface AuthRequest extends Request {
   user: {
@@ -38,6 +39,8 @@ export class AuthController {
     private authService: AuthService,
     private configService: ConfigService
   ) {}
+
+  URL_VERIFY_EMAIL = `${this.configService.get("CLIENT_URL")}/verify-email-success`;
 
   @Post("signup")
   @ApiOperation({ summary: "User registration" })
@@ -81,21 +84,21 @@ export class AuthController {
   authenticateWithGoogleToken(@Body("idToken") idToken: string) {
     return this.authService.authenticateWithGoogle(idToken);
   }
-	//Forgot password
-	@Post('forgot-password')
-	@ApiOperation({ summary: 'Forgot password' })
-	@ApiResponse({ status: 200, description: 'Password reset email sent' })
-	async forgotPassword(@Body() forgotPasswordDto: ForgotPasswordDto) {
-		return this.authService.forgotPassword(forgotPasswordDto);
-	}
+  //Forgot password
+  @Post("forgot-password")
+  @ApiOperation({ summary: "Forgot password" })
+  @ApiResponse({ status: 200, description: "Password reset email sent" })
+  async forgotPassword(@Body() forgotPasswordDto: ForgotPasswordDto) {
+    return this.authService.forgotPassword(forgotPasswordDto);
+  }
 
-	//Reset password
-	@Post('reset-password')
-	@ApiOperation({ summary: 'Reset password' })
-	@ApiResponse({ status: 200, description: 'Password reset successfully' })
-	async resetPassword(@Body() resetPasswordDto: ResetPasswordDto) {
-		return this.authService.resetPassword(resetPasswordDto);
-	}
+  //Reset password
+  @Post("reset-password")
+  @ApiOperation({ summary: "Reset password" })
+  @ApiResponse({ status: 200, description: "Password reset successfully" })
+  async resetPassword(@Body() resetPasswordDto: ResetPasswordDto) {
+    return this.authService.resetPassword(resetPasswordDto);
+  }
   @UseGuards(JwtRefreshTokenGuard)
   @Post("refresh")
   @ApiOperation({ summary: "Refresh access token" })
@@ -117,8 +120,6 @@ export class AuthController {
     if (result == null) {
       return res.status(400).json({ message: "Verify account fail" });
     }
-    return res.redirect(
-      `${this.configService.get("CLIENT_URL")}/verify-email-success`
-    );
+    return res.redirect(this.URL_VERIFY_EMAIL);
   }
 }
