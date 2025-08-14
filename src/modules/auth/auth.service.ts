@@ -284,8 +284,9 @@ export class AuthService {
     const resetToken = this.jwtService.sign(
       { sub: user.id, email: user.email },
       {
-        secret: access_token_private_key,
+        privateKey: access_token_private_key,
         expiresIn: "30m",
+        algorithm: "RS256",
       }
     );
 
@@ -314,6 +315,8 @@ export class AuthService {
 
     // Hash password mới
     const hashedPassword = await bcrypt.hash(newPassword, 10);
+    console.log("New password: ", newPassword);
+    console.log("Password hashed: ", hashedPassword);
 
     // Cập nhật password
     await this.usersService.update(user.id, {
