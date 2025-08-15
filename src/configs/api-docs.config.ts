@@ -12,8 +12,9 @@ export function configSwagger(app: INestApplication) {
 		.setTitle('Data Vis project')
 		.setDescription('## The Data Vis API description')
 		.setVersion('1.0')
-		.addSecurity('token', { type: 'http', scheme: 'bearer' })
+		.addBearerAuth({ type: 'http', scheme: 'bearer', bearerFormat: 'JWT' })
 		.build();
+		
 	const document = SwaggerModule.createDocument(app, config);
 
 	const http_adapter = app.getHttpAdapter();
@@ -60,7 +61,6 @@ export function configSwagger(app: INestApplication) {
 	);
 	SwaggerModule.setup('api-docs', app, document, {
 		swaggerOptions: { persistAuthorization: true },
-		customJs: '/swagger-custom.js',
 		customSiteTitle: 'Data Vis Documentation',
 		customfavIcon: '/swagger.ico',
 	});

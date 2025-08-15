@@ -204,11 +204,10 @@ export class AuthService {
 
   async verifyEmail(token: string): Promise<any> {
     try {
-      console.log("Verifying token:", token.substring(0, 50) + "...");
-      console.log(
-        "Using public key:",
-        access_token_public_key.substring(0, 100) + "..."
-      );
+      // console.log(
+      //   "Using public key:",
+      //   access_token_public_key.substring(0, 100) + "..."
+      // );
 
       // Giải mã token với RSA public key
       const payload = this.jwtService.verify(token, {
