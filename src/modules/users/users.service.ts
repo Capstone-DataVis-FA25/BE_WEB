@@ -5,6 +5,7 @@ import { UpdateUserDto } from './dto/update-user.dto';
 import { User, UserWithoutPassword } from '../../types/user.types';
 import * as bcrypt from 'bcryptjs';
 import { ChangePasswordDTO } from './dto/change-password.dto';
+import { validatePassword, getPasswordValidationErrors } from '../../utils/auth.utils';
 
 @Injectable()
 export class UsersService {
@@ -63,7 +64,6 @@ export class UsersService {
 		const user = await this.prisma.user.findUnique({
 			where: { email },
 		});
-
 		return user as User | null;
 	}
 
@@ -141,6 +141,12 @@ export class UsersService {
 			throw new BadRequestException('New password and confirmation password do not match');
 		}
 
+		// Validate new password strength
+		if (!validatePassword(dto.new_password)) {
+			const errors = getPasswordValidationErrors(dto.new_password);
+			throw new BadRequestException(`Password validation failed: ${errors.join(', ')}`);
+		}
+
 		const isOldPasswordValid = await bcrypt.compare(dto.old_password, user.password);
 		if (!isOldPasswordValid) {
 			throw new UnauthorizedException('Old password is incorrect');
@@ -159,7 +165,7 @@ export class UsersService {
 	}
 
 	// Update user profile
-	async updateProfile(userId: string, updateUserdto: UpdateUserDto): Promise<{user: User}> {
+	async updateProfile(userId: string, updateUserdto: UpdateUserDto): Promise<{ user: User }> {
 		// Update user profile
 		const updatedUser = await this.prisma.user.update({
 			where: { id: userId },
@@ -169,6 +175,6 @@ export class UsersService {
 			},
 		});
 
-		return {user: updatedUser};
+		return { user: updatedUser as User };
 	}
 }
