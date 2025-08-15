@@ -51,6 +51,7 @@ export class UsersService {
 				lastName: true,
 				role: true,
 				isActive: true,
+				isVerified: true,
 				createdAt: true,
 				updatedAt: true,
 			},
