@@ -2,10 +2,10 @@ import { Injectable, BadRequestException, NotFoundException, UnauthorizedExcepti
 import { PrismaService } from '../../prisma/prisma.service';
 import { CreateUserDto, UserRole } from './dto/create-user.dto';
 import { UpdateUserDto } from './dto/update-user.dto';
-import { User, UserWithoutPassword } from '../../types/user.types';
+import {  UserWithoutPassword } from '../../types/user.types';
 import * as bcrypt from 'bcryptjs';
 import { ChangePasswordDTO } from './dto/change-password.dto';
-
+import { User } from "@prisma/client";
 @Injectable()
 export class UsersService {
 	constructor(private prisma: PrismaService) { }
@@ -82,7 +82,19 @@ export class UsersService {
 		return user as User;
 	}
 
-	async remove(id: string): Promise<void> {
+	async remove(id: string, email?: string): Promise<void> {
+		if (!email) {
+			throw new BadRequestException('Email is required to delete account');
+		}
+		const user = await this.prisma.user.findUnique({
+			where: { id },
+		});
+		if (!user) {
+			throw new NotFoundException('User not found');
+		}
+		if (user.email !== email) {
+			throw new UnauthorizedException('Email is incorrect');
+		}
 		await this.prisma.user.delete({
 			where: { id },
 		});

@@ -9,7 +9,7 @@ import {
 	UseGuards,
 	Request,
 } from '@nestjs/common';
-import { ApiTags, ApiOperation, ApiResponse, ApiBearerAuth } from '@nestjs/swagger';
+import { ApiTags, ApiOperation, ApiResponse, ApiBearerAuth, ApiBody } from '@nestjs/swagger';
 import { UsersService } from './users.service';
 import { CreateUserDto } from './dto/create-user.dto';
 import { UpdateUserDto } from './dto/update-user.dto';
@@ -20,6 +20,7 @@ import { AuthRequest } from '@modules/auth/auth.controller';
 
 @ApiTags('users')
 @Controller('users')
+@ApiBearerAuth()
 export class UsersController {
 	constructor(private readonly usersService: UsersService) { }
 
@@ -70,7 +71,9 @@ export class UsersController {
 	@Delete(':id')
 	@ApiOperation({ summary: 'Delete user by ID' })
 	@ApiResponse({ status: 200, description: 'User deleted successfully' })
-	remove(@Param('id') id: string) {
-		return this.usersService.remove(id);
+	@UseGuards(JwtAccessTokenGuard)
+	@ApiBody({ schema: { properties: { email: { type: 'string' } } } })
+	remove(@Param('id') id: string, @Body('email') email: string) {
+		return this.usersService.remove(id, email);
 	}
 }
