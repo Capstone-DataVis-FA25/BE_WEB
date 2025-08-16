@@ -74,7 +74,7 @@ export class AuthController {
     const result = await this.authService.authenticateWithGoogleUser(user);
 
     // Redirect to frontend with tokens
-    const redirectUrl = `${this.configService.get("FRONTEND_URL")}/auth/callback?access_token=${result.tokens.access_token}&refresh_token=${result.tokens.refresh_token}`;
+    const redirectUrl = `${this.configService.get("CLIENT_URL")}/auth/callback?access_token=${result.tokens.access_token}&refresh_token=${result.tokens.refresh_token}`;
     res.redirect(redirectUrl);
   }
 
