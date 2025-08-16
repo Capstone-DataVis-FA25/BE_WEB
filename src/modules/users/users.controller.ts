@@ -38,6 +38,12 @@ export class UsersController {
 		return this.usersService.findAll();
 	}
 
+	@Get('me')
+	@UseGuards(JwtAccessTokenGuard)
+	viewProfile(@Request() req: AuthRequest) {
+		return this.usersService.findOne(req.user.userId);
+	}
+
 	@Get(':id')
 	@ApiOperation({ summary: 'Get user by ID' })
 	@ApiResponse({ status: 200, description: 'User found' })
