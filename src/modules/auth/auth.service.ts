@@ -25,7 +25,6 @@ import { EmailService } from "../email/email.service";
 import { GoogleAuthService } from "./google-auth.service";
 import { ForgotPasswordDto } from "./dto/forgot-password.dto";
 import { ResetPasswordDto } from "./dto/reset-password.dto";
-import { validatePassword, getPasswordValidationErrors } from "../../utils/auth.utils";
 
 export interface GoogleUser {
   email: string;
@@ -305,28 +304,18 @@ export class AuthService {
         secret: access_token_private_key,
       });
     } catch (error) {
-      throw new BadRequestException("Token is invalid or has expired");
+      throw new UnauthorizedException("Token is invalid or has expired");
     }
 
     const user = await this.usersService.findByEmail(payload.email);
     if (!user) {
-      throw new BadRequestException("User doesn't exist");
+      throw new UnauthorizedException("User doesn't exist");
     }
 
-    // Validate new password strength
-    if (!validatePassword(newPassword)) {
-      const errors = getPasswordValidationErrors(newPassword);
-      throw new BadRequestException(`Password validation failed: ${errors.join(', ')}`);
-    }
-
-    // Cập nhật password - hash bên trong hàm update
+    // Cập nhật password
     await this.usersService.update(user.id, {
       password: newPassword,
     });
-
-    const currentUser = await this.usersService.findOne(user.id);
-
-    console.log(`Current User: ${currentUser.firstName}`);
 
     return {
       message: "Password has been reset successfully",

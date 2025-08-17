@@ -5,7 +5,6 @@ import { UpdateUserDto } from './dto/update-user.dto';
 import { User, UserWithoutPassword } from '../../types/user.types';
 import * as bcrypt from 'bcryptjs';
 import { ChangePasswordDTO } from './dto/change-password.dto';
-import { validatePassword, getPasswordValidationErrors } from '../../utils/auth.utils';
 
 @Injectable()
 export class UsersService {
@@ -139,12 +138,6 @@ export class UsersService {
 
 		if (dto.new_password !== dto.confirm_password) {
 			throw new BadRequestException('New password and confirmation password do not match');
-		}
-
-		// Validate new password strength
-		if (!validatePassword(dto.new_password)) {
-			const errors = getPasswordValidationErrors(dto.new_password);
-			throw new BadRequestException(`Password validation failed: ${errors.join(', ')}`);
 		}
 
 		const isOldPasswordValid = await bcrypt.compare(dto.old_password, user.password);
