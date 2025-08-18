@@ -40,8 +40,6 @@ export class AuthController {
     private configService: ConfigService
   ) {}
 
-  URL_VERIFY_EMAIL = `${this.configService.get("CLIENT_URL")}/verify-email-success`;
-
   @Post("signup")
   @ApiOperation({ summary: "User registration" })
   @ApiResponse({ status: 201, description: "User registered successfully" })
@@ -74,7 +72,7 @@ export class AuthController {
     const result = await this.authService.authenticateWithGoogleUser(user);
 
     // Redirect to frontend with tokens
-    const redirectUrl = `${this.configService.get("FRONTEND_URL")}/auth/callback?access_token=${result.tokens.access_token}&refresh_token=${result.tokens.refresh_token}`;
+    const redirectUrl = `${this.configService.get("CLIENT_URL")}/auth/callback?access_token=${result.tokens.access_token}&refresh_token=${result.tokens.refresh_token}`;
     res.redirect(redirectUrl);
   }
 
@@ -117,9 +115,10 @@ export class AuthController {
   @ApiResponse({ status: 200, description: "Email verified successfully" })
   async verifyEmail(@Query("token") token: string, @Res() res: Response) {
     const result = await this.authService.verifyEmail(token);
+    const URL_VERIFY_EMAIL = `${this.configService.get("CLIENT_URL")}/verify-email-success`;
     if (result == null) {
       return res.status(400).json({ message: "Verify account fail" });
     }
-    return res.redirect(this.URL_VERIFY_EMAIL);
+    return res.redirect(URL_VERIFY_EMAIL);
   }
 }

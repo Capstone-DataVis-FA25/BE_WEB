@@ -51,14 +51,16 @@ export class AuthService {
   }> {
     // Check if user exists
     const existingUser = await this.usersService.findByEmail(signUpDto.email);
+
     if (existingUser) {
-      throw new ConflictException("User with this email already exists");
+      throw new UnauthorizedException("User with this email already exists");
     }
 
     // Create user
     const user = await this.usersService.create({
       ...signUpDto,
       role: UserRole.USER,
+      isVerified: false,
     });
 
     // Generate tokens

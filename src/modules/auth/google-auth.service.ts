@@ -51,6 +51,7 @@ export class GoogleAuthService {
         lastName: family_name || "",
         password: Math.random().toString(36) + Date.now().toString(36), // Random password for Google users
         role: UserRole.USER,
+        isVerified: true,
       });
     }
 
