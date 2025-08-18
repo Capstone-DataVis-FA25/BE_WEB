@@ -64,7 +64,6 @@ export class UsersService {
 		const user = await this.prisma.user.findUnique({
 			where: { email },
 		});
-
 		return user as User | null;
 	}
 
@@ -172,7 +171,7 @@ export class UsersService {
 	}
 
 	// Update user profile
-	async updateProfile(userId: string, updateUserdto: UpdateUserDto): Promise<{user: User}> {
+	async updateProfile(userId: string, updateUserdto: UpdateUserDto): Promise<{ user: User }> {
 		// Update user profile
 		const updatedUser = await this.prisma.user.update({
 			where: { id: userId },
@@ -182,6 +181,6 @@ export class UsersService {
 			},
 		});
 
-		return {user: updatedUser};
+		return { user: updatedUser as User };
 	}
 }

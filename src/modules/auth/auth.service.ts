@@ -41,7 +41,7 @@ export class AuthService {
     private readonly jwtService: JwtService,
     private readonly emailService: EmailService,
     private readonly googleAuthService: GoogleAuthService
-  ) {}
+  ) { }
 
   async signUp(signUpDto: SignUpDto): Promise<{
     user: Partial<User>;
@@ -95,7 +95,6 @@ export class AuthService {
     if (!user.isActive) {
       throw new UnauthorizedException("Account is deactivated");
     }
-
     if (!user.isVerified) {
       throw new UnauthorizedException(
         "Account is not verify ! Please check mail"
@@ -304,22 +303,18 @@ export class AuthService {
         secret: access_token_private_key,
       });
     } catch (error) {
-      throw new Error("Token is invalid or has expired");
+      throw new UnauthorizedException("Token is invalid or has expired");
     }
 
     const user = await this.usersService.findByEmail(payload.email);
     if (!user) {
-      throw new Error("User doesn't exist");
+      throw new UnauthorizedException("User doesn't exist");
     }
 
-    // Cập nhật password - hash bên trong hàm update
+    // Cập nhật password
     await this.usersService.update(user.id, {
       password: newPassword,
     });
-
-    const currentUser = await this.usersService.findOne(user.id);
-
-    console.log(`Current User: ${currentUser.firstName}`);
 
     return {
       message: "Password has been reset successfully",
