@@ -160,7 +160,6 @@ export class UsersService {
 
   async markVerified(userId: string): Promise<User> {
     const updated = await this.update(userId, {
-      // isVerified: true,
       currentVerifyToken: null,
     } as any);
 
