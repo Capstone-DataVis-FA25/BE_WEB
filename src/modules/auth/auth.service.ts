@@ -25,6 +25,15 @@ import { EmailService } from "../email/email.service";
 import { GoogleAuthService } from "./google-auth.service";
 import { ForgotPasswordDto } from "./dto/forgot-password.dto";
 import { ResetPasswordDto } from "./dto/reset-password.dto";
+import e from "express";
+import { use } from "passport";
+import {
+  EMAIL_ALREADY_VERIFY,
+  EMAIL_VERIFY_SUCCESS,
+  USER_ALREADY_EXIST,
+  USER_NOT_FOUND,
+  VERIFY_TOKEN_EXPIRED,
+} from "src/constant/message-exception-config";
 
 export interface GoogleUser {
   email: string;
@@ -49,41 +58,100 @@ export class AuthService {
     message: string;
     verifyToken?: string;
   }> {
-    // Check if user exists
     const existingUser = await this.usersService.findByEmail(signUpDto.email);
 
     if (existingUser) {
-      throw new UnauthorizedException("User with this email already exists");
+      if (existingUser.isVerified) {
+        throw new UnauthorizedException(USER_ALREADY_EXIST);
+      } else {
+        // Xóa currentVerifyToken cũ
+        await this.usersService.update(existingUser.id, {
+          currentVerifyToken: null,
+        });
+
+        // Tạo verifyToken mới
+        const verifyToken = await this.generateVerifyToken(
+          existingUser.id,
+          existingUser.email
+        );
+
+        // Gán lại currentVerifyToken
+        await this.usersService.update(existingUser.id, {
+          currentVerifyToken: verifyToken,
+        });
+
+        // Gửi lại email xác thực
+        await this.emailService.sendEmailVerification(
+          existingUser.email,
+          verifyToken
+        );
+
+        return {
+          user: { ...existingUser, password: undefined },
+          tokens: null,
+          verifyToken,
+          message: "Email verification re-send success! Check mail",
+        };
+      }
     }
 
-    // Create user
+    // Tạo user mới
     const user = await this.usersService.create({
       ...signUpDto,
       role: UserRole.USER,
       isVerified: false,
     });
 
-    // Generate tokens
-    const tokens = await this.generateTokens(user.id, user.email);
-
-    // Generate verify token using dedicated method
+    // Tạo verifyToken mới
     const verifyToken = await this.generateVerifyToken(user.id, user.email);
 
-    // Send verify email
+    // Gán currentVerifyToken
+    await this.usersService.update(user.id, {
+      currentVerifyToken: verifyToken,
+    });
+
+    // Gửi email xác thực
     await this.emailService.sendEmailVerification(user.email, verifyToken);
+
+    // Generate tokens
+    const tokens = await this.generateTokens(user.id, user.email);
 
     // Save refresh token
     await this.usersService.updateRefreshToken(user.id, tokens.refresh_token);
 
-    // Remove password from response
     const { password, ...userResponse } = user;
+
+    const updatedUser = await this.usersService.findOne(user.id);
 
     return {
       user: userResponse,
       tokens,
-      verifyToken: verifyToken,
+      verifyToken,
       message: "Email verification send success! Check mail",
     };
+  }
+
+  async resendVerifyEmail(email: string) {
+    const user = await this.usersService.findByEmail(email);
+    if (!user) {
+      return { message: "User not found" };
+    }
+    if (user.isVerified == true) {
+      return { message: "User have already verified!" };
+    }
+    // Nếu chưa verify, gửi lại email xác thực
+    // Xóa currentVerifyToken nếu có
+    await this.usersService.update(user.id, { currentVerifyToken: null });
+
+    // Tạo mới và update mới
+    const verifyToken = await this.generateVerifyToken(user.id, user.email);
+
+    await this.usersService.update(user.id, {
+      currentVerifyToken: verifyToken,
+    });
+
+    await this.emailService.sendEmailVerification(user.email, verifyToken);
+    return { message: "Email verification re-send success! Check mail" };
   }
 
   async signIn(
@@ -135,9 +203,7 @@ export class AuthService {
       const tokens = await this.generateTokens(user.id, user.email);
       await this.usersService.updateRefreshToken(user.id, tokens.refresh_token);
 
-      // Remove password from response
       const { password, ...userResponse } = user;
-
       return { user: userResponse, tokens };
     } catch (error) {
       throw new BadRequestException({
@@ -169,6 +235,9 @@ export class AuthService {
 
       // Remove password from response
       const { password, ...userResponse } = user;
+
+      // Update is verified attribute via UsersService helper
+      await this.usersService.markVerified(user.id);
 
       return { user: userResponse, tokens };
     } catch (error) {
@@ -206,12 +275,6 @@ export class AuthService {
 
   async verifyEmail(token: string): Promise<any> {
     try {
-      console.log("Verifying token:", token.substring(0, 50) + "...");
-      console.log(
-        "Using public key:",
-        access_token_public_key.substring(0, 100) + "..."
-      );
-
       // Giải mã token với RSA public key
       const payload = this.jwtService.verify(token, {
         publicKey: access_token_public_key,
@@ -220,17 +283,32 @@ export class AuthService {
 
       const user = await this.usersService.findByEmail(payload.email);
       if (!user) {
-        throw new BadRequestException("User not found");
+        throw new BadRequestException(USER_NOT_FOUND);
       }
-      if (user.isVerified) {
+
+      // Nếu user đã verify = true -> xóa currentVerifyToken -> trả về message
+      if (user.isVerified == true) {
+        await this.usersService.update(user.id, { currentVerifyToken: null });
         return { message: "Email đã được xác thực trước đó." };
       }
-      await this.usersService.update(user.id, { isVerified: true });
+
+      // Giải token xem còn hạn không ?
+      await this.usersService.verifyByToken(user.id, token);
+
       return { message: "Xác thực email thành công." };
     } catch (error) {
-      throw new BadRequestException(
-        "Token xác thực không hợp lệ hoặc đã hết hạn"
-      );
+      if (error.name === "TokenExpiredError") {
+        throw new BadRequestException("Token đã hết hạn");
+      }
+      if (error.name === "JsonWebTokenError") {
+        throw new BadRequestException("Token không hợp lệ");
+      }
+      if (error.message === "Token invalid or already used") {
+        throw new BadRequestException(
+          "Token không hợp lệ hoặc đã được sử dụng"
+        );
+      }
+      throw new BadRequestException(VERIFY_TOKEN_EXPIRED);
     }
   }
 
@@ -319,10 +397,6 @@ export class AuthService {
     await this.usersService.update(user.id, {
       password: newPassword,
     });
-
-    const currentUser = await this.usersService.findOne(user.id);
-
-    console.log(`Current User: ${currentUser.firstName}`);
 
     return {
       message: "Password has been reset successfully",

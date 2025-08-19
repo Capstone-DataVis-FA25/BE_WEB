@@ -45,4 +45,9 @@ export class CreateUserDto {
   @IsOptional()
   @IsEnum(UserRole)
   role?: UserRole;
+
+  @ApiProperty({ required: false })
+  @IsOptional()
+  @IsString()
+  currentVerifyToken?: string;
 }

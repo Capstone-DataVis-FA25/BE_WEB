@@ -1,174 +1,247 @@
-import { Injectable, BadRequestException, NotFoundException, UnauthorizedException } from '@nestjs/common';
-import { PrismaService } from '../../prisma/prisma.service';
-import { CreateUserDto, UserRole } from './dto/create-user.dto';
-import { UpdateUserDto } from './dto/update-user.dto';
-import { User, UserWithoutPassword } from '../../types/user.types';
-import * as bcrypt from 'bcryptjs';
-import { ChangePasswordDTO } from './dto/change-password.dto';
+import {
+  Injectable,
+  BadRequestException,
+  NotFoundException,
+  UnauthorizedException,
+} from "@nestjs/common";
+import { PrismaService } from "../../prisma/prisma.service";
+import { CreateUserDto, UserRole } from "./dto/create-user.dto";
+import { UpdateUserDto } from "./dto/update-user.dto";
+import { User, UserWithoutPassword } from "../../types/user.types";
+import * as bcrypt from "bcryptjs";
+import { ChangePasswordDTO } from "./dto/change-password.dto";
+import {
+  EMAIL_ALREADY_VERIFY,
+  USER_NOT_FOUND,
+  VERIFY_TOKEN_EXPIRED,
+} from "src/constant/message-exception-config";
 
 @Injectable()
 export class UsersService {
-	constructor(private prisma: PrismaService) { }
+  constructor(private prisma: PrismaService) {}
 
-	async create(createUserDto: CreateUserDto): Promise<User> {
-		const hashedPassword = await bcrypt.hash(createUserDto.password, 10);
+  async create(createUserDto: CreateUserDto): Promise<User> {
+    const hashedPassword = await bcrypt.hash(createUserDto.password, 10);
 
-		const user = await this.prisma.user.create({
-			data: {
-				...createUserDto,
-				password: hashedPassword,
-				role: createUserDto.role || UserRole.USER,
-			},
-		});
+    const user = await this.prisma.user.create({
+      data: {
+        ...createUserDto,
+        password: hashedPassword,
+        role: createUserDto.role || UserRole.USER,
+      },
+    });
 
-		return user as User;
-	}
+    return user as User;
+  }
 
-	async findAll(): Promise<UserWithoutPassword[]> {
-		const users = await this.prisma.user.findMany({
-			select: {
-				id: true,
-				email: true,
-				firstName: true,
-				lastName: true,
-				role: true,
-				isActive: true,
-				createdAt: true,
-				updatedAt: true,
-			},
-		});
+  async findAll(): Promise<UserWithoutPassword[]> {
+    const users = await this.prisma.user.findMany({
+      select: {
+        id: true,
+        email: true,
+        firstName: true,
+        lastName: true,
+        role: true,
+        isActive: true,
+        createdAt: true,
+        updatedAt: true,
+      },
+    });
 
-		return users as UserWithoutPassword[];
-	}
+    return users as UserWithoutPassword[];
+  }
 
-	async findOne(id: string): Promise<UserWithoutPassword | null> {
-		const user = await this.prisma.user.findUnique({
-			where: { id },
-			select: {
-				id: true,
-				email: true,
-				firstName: true,
-				lastName: true,
-				role: true,
-				isActive: true,
-				createdAt: true,
-				updatedAt: true,
-			},
-		});
+  async findOne(id: string): Promise<UserWithoutPassword | null> {
+    const user = await this.prisma.user.findUnique({
+      where: { id },
+      select: {
+        id: true,
+        email: true,
+        firstName: true,
+        lastName: true,
+        role: true,
+        isActive: true,
+        createdAt: true,
+        updatedAt: true,
+      },
+    });
 
-		return user as UserWithoutPassword | null;
-	}
+    return user as UserWithoutPassword | null;
+  }
 
-	async findByEmail(email: string): Promise<User | null> {
-		const user = await this.prisma.user.findUnique({
-			where: { email },
-		});
+  async findByEmail(email: string): Promise<User | null> {
+    const user = await this.prisma.user.findUnique({
+      where: { email },
+    });
 
-		return user as User | null;
-	}
+    return user as User | null;
+  }
 
-	async update(id: string, updateUserDto: UpdateUserDto): Promise<User> {
-		const updateData: any = { ...updateUserDto };
+  async update(id: string, updateUserDto: UpdateUserDto): Promise<User> {
+    const updateData: any = { ...updateUserDto };
 
-		if (updateUserDto.password) {
-			updateData.password = await bcrypt.hash(updateUserDto.password, 10);
-		}
+    if (updateUserDto.password) {
+      updateData.password = await bcrypt.hash(updateUserDto.password, 10);
+    }
 
-		const user = await this.prisma.user.update({
-			where: { id },
-			data: updateData,
-		});
+    const user = await this.prisma.user.update({
+      where: { id },
+      data: updateData,
+    });
 
-		return user as User;
-	}
+    return user as User;
+  }
 
-	async remove(id: string): Promise<void> {
-		await this.prisma.user.delete({
-			where: { id },
-		});
-	}
+  async remove(id: string): Promise<void> {
+    await this.prisma.user.delete({
+      where: { id },
+    });
+  }
 
-	async updateRefreshToken(userId: string, refreshToken: string): Promise<void> {
-		const hashedRefreshToken = await bcrypt.hash(refreshToken, 10);
+  async updateRefreshToken(
+    userId: string,
+    refreshToken: string
+  ): Promise<void> {
+    const hashedRefreshToken = await bcrypt.hash(refreshToken, 10);
 
-		await this.prisma.user.update({
-			where: { id: userId },
-			data: {
-				currentHashedRefreshToken: hashedRefreshToken,
-			},
-		});
-	}
+    await this.prisma.user.update({
+      where: { id: userId },
+      data: {
+        currentHashedRefreshToken: hashedRefreshToken,
+      },
+    });
+  }
 
-	async getUserIfRefreshTokenMatches(refreshToken: string, userId: string): Promise<User | null> {
-		const user = await this.prisma.user.findUnique({
-			where: { id: userId },
-		});
+  async getUserIfRefreshTokenMatches(
+    refreshToken: string,
+    userId: string
+  ): Promise<User | null> {
+    const user = await this.prisma.user.findUnique({
+      where: { id: userId },
+    });
 
-		if (!user || !user.currentHashedRefreshToken) {
-			return null;
-		}
+    if (!user || !user.currentHashedRefreshToken) {
+      return null;
+    }
 
-		const isRefreshTokenMatching = await bcrypt.compare(
-			refreshToken,
-			user.currentHashedRefreshToken,
-		);
+    const isRefreshTokenMatching = await bcrypt.compare(
+      refreshToken,
+      user.currentHashedRefreshToken
+    );
 
-		if (isRefreshTokenMatching) {
-			return user as User;
-		}
+    if (isRefreshTokenMatching) {
+      return user as User;
+    }
 
-		return null;
-	}
+    return null;
+  }
 
-	async removeRefreshToken(userId: string): Promise<void> {
-		await this.prisma.user.update({
-			where: { id: userId },
-			data: {
-				currentHashedRefreshToken: null,
-			},
-		});
-	}
-	async changePassword(userId: string, dto: ChangePasswordDTO): Promise<{ message: string }> {
-		const user = await this.prisma.user.findUnique({
-			where: { id: userId },
-		});
+  async removeRefreshToken(userId: string): Promise<void> {
+    await this.prisma.user.update({
+      where: { id: userId },
+      data: {
+        currentHashedRefreshToken: null,
+      },
+    });
+  }
 
-		if (!user) {
-			throw new NotFoundException('User not found');
-		}
+  async markVerified(userId: string): Promise<User> {
+    const updated = await this.update(userId, {
+      // isVerified: true,
+      currentVerifyToken: null,
+    } as any);
 
-		if (dto.new_password !== dto.confirm_password) {
-			throw new BadRequestException('New password and confirmation password do not match');
-		}
+    return updated as User;
+  }
 
-		const isOldPasswordValid = await bcrypt.compare(dto.old_password, user.password);
-		if (!isOldPasswordValid) {
-			throw new UnauthorizedException('Old password is incorrect');
-		}
+  async verifyByToken(userId: string, token: string): Promise<User> {
+    // Lấy user để kiểm tra chi tiết
+    const user = await this.prisma.user.findUnique({
+      where: { id: userId },
+    });
 
-		const hashedNewPassword = await bcrypt.hash(dto.new_password, 10);
+    if (!user) {
+      throw new BadRequestException(USER_NOT_FOUND);
+    }
 
-		await this.prisma.user.update({
-			where: { id: userId },
-			data: { password: hashedNewPassword },
-		});
+    console.log(`VERIFY BY TOKEN - User ID: ${userId}`);
+    console.log(`VERIFY BY TOKEN - Token truyền vào: ${token}`);
+    console.log(
+      `VERIFY BY TOKEN - Current verify token: ${user.currentVerifyToken}`
+    );
+    console.log(`VERIFY BY TOKEN - Is verified: ${user.isVerified}`);
 
-		return {
-			message: 'Password changed successfully'
-		};
-	}
+    // Kiểm tra từng điều kiện một cách rõ ràng
+    if (user.isVerified) {
+      throw new BadRequestException(EMAIL_ALREADY_VERIFY);
+    }
 
-	// Update user profile
-	async updateProfile(userId: string, updateUserdto: UpdateUserDto): Promise<{user: User}> {
-		// Update user profile
-		const updatedUser = await this.prisma.user.update({
-			where: { id: userId },
-			data: {
-				firstName: updateUserdto.firstName,
-				lastName: updateUserdto.lastName,
-			},
-		});
+    if (user.currentVerifyToken !== token) {
+      throw new BadRequestException(VERIFY_TOKEN_EXPIRED);
+    }
 
-		return {user: updatedUser};
-	}
+    // Token hợp lệ, tiến hành verify
+    const updated = await this.update(userId, {
+      isVerified: true,
+      currentVerifyToken: null,
+    } as any);
+
+    console.log(`VERIFY BY TOKEN - User verified successfully: ${userId}`);
+    return updated as User;
+  }
+
+  async changePassword(
+    userId: string,
+    dto: ChangePasswordDTO
+  ): Promise<{ message: string }> {
+    const user = await this.prisma.user.findUnique({
+      where: { id: userId },
+    });
+
+    if (!user) {
+      throw new NotFoundException(USER_NOT_FOUND);
+    }
+
+    if (dto.new_password !== dto.confirm_password) {
+      throw new BadRequestException(
+        "New password and confirmation password do not match"
+      );
+    }
+
+    const isOldPasswordValid = await bcrypt.compare(
+      dto.old_password,
+      user.password
+    );
+    if (!isOldPasswordValid) {
+      throw new UnauthorizedException("Old password is incorrect");
+    }
+
+    const hashedNewPassword = await bcrypt.hash(dto.new_password, 10);
+
+    await this.prisma.user.update({
+      where: { id: userId },
+      data: { password: hashedNewPassword },
+    });
+
+    return {
+      message: "Password changed successfully",
+    };
+  }
+
+  // Update user profile
+  async updateProfile(
+    userId: string,
+    updateUserdto: UpdateUserDto
+  ): Promise<{ user: Partial<User> }> {
+    // Update user profile
+    const updatedUser = await this.prisma.user.update({
+      where: { id: userId },
+      data: {
+        firstName: updateUserdto.firstName,
+        lastName: updateUserdto.lastName,
+      },
+    });
+
+    return { user: updatedUser };
+  }
 }
