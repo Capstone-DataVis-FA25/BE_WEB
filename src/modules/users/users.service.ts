@@ -61,6 +61,7 @@ export class UsersService {
         lastName: true,
         role: true,
         isActive: true,
+        isVerified: true,
         createdAt: true,
         updatedAt: true,
       },
@@ -92,7 +93,19 @@ export class UsersService {
     return user as User;
   }
 
-  async remove(id: string): Promise<void> {
+  async remove(id: string, email?: string): Promise<void> {
+    if (!email) {
+      throw new BadRequestException("Email is required to delete account");
+    }
+    const user = await this.prisma.user.findUnique({
+      where: { id },
+    });
+    if (!user) {
+      throw new NotFoundException("User not found");
+    }
+    if (user.email !== email) {
+      throw new UnauthorizedException("Email is incorrect");
+    }
     await this.prisma.user.delete({
       where: { id },
     });
