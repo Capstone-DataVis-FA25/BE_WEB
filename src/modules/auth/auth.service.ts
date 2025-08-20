@@ -24,7 +24,7 @@ import { EmailService } from "../email/email.service";
 import { GoogleAuthService } from "./google-auth.service";
 import { ForgotPasswordDto } from "./dto/forgot-password.dto";
 import { ResetPasswordDto } from "./dto/reset-password.dto";
-import { messageException } from "src/constant/message-exception-config";
+import { message } from "src/constant/message-exception-config";
 
 export interface GoogleUser {
   email: string;
@@ -53,7 +53,7 @@ export class AuthService {
 
     if (existingUser) {
       if (existingUser.isVerified) {
-        throw new UnauthorizedException(messageException.USER_ALREADY_EXIST);
+        throw new UnauthorizedException(message.USER_ALREADY_EXIST);
       } else {
         // Xóa currentVerifyToken cũ
         await this.usersService.update(existingUser.id, {
@@ -81,7 +81,7 @@ export class AuthService {
           user: { ...existingUser, password: undefined },
           tokens: null,
           verifyToken,
-          message: messageException.EMAIL_VERIFICATION_RESEND_SUCCESS,
+          message: message.EMAIL_VERIFICATION_RESEND_SUCCESS,
         };
       }
     }
@@ -118,17 +118,17 @@ export class AuthService {
       user: userResponse,
       tokens,
       verifyToken,
-      message: messageException.EMAIL_VERIFICATION_SEND_SUCCESS,
+      message: message.EMAIL_VERIFICATION_SEND_SUCCESS,
     };
   }
 
   async resendVerifyEmail(email: string) {
     const user = await this.usersService.findByEmail(email);
     if (!user) {
-      return { message: messageException.USER_NOT_FOUND };
+      return { message: message.USER_NOT_FOUND };
     }
     if (user.isVerified == true) {
-      return { message: messageException.EMAIL_ALREADY_VERIFY };
+      return { message: message.EMAIL_ALREADY_VERIFY };
     }
     // Nếu chưa verify, gửi lại email xác thực
     // Xóa currentVerifyToken nếu có
@@ -142,7 +142,7 @@ export class AuthService {
     });
 
     await this.emailService.sendEmailVerification(user.email, verifyToken);
-    return { message: messageException.EMAIL_VERIFICATION_RESEND_SUCCESS };
+    return { message: message.EMAIL_VERIFICATION_RESEND_SUCCESS };
   }
 
   async signIn(
@@ -150,14 +150,14 @@ export class AuthService {
   ): Promise<{ user: Partial<User>; tokens: any }> {
     const user = await this.validateUser(signInDto.email, signInDto.password);
     if (!user) {
-      throw new UnauthorizedException(messageException.USER_UNAUTHORIZATION);
+      throw new UnauthorizedException(message.USER_UNAUTHORIZATION);
     }
 
     if (!user.isActive) {
-      throw new UnauthorizedException(messageException.USER_IN_ACTIVE);
+      throw new UnauthorizedException(message.USER_IN_ACTIVE);
     }
     if (!user.isVerified) {
-      throw new UnauthorizedException(messageException.USER_NOT_VERIFIED);
+      throw new UnauthorizedException(message.USER_NOT_VERIFIED);
     }
 
     const tokens = await this.generateTokens(user.id, user.email);
@@ -184,8 +184,8 @@ export class AuthService {
       if (!user.isActive) {
         throw new HttpException(
           {
-            message: messageException.USER_IN_ACTIVE,
-            error: messageException.USER_UNAUTHORIZATION,
+            message: message.USER_IN_ACTIVE,
+            error: message.USER_UNAUTHORIZATION,
           },
           HttpStatus.UNAUTHORIZED
         );
@@ -217,8 +217,8 @@ export class AuthService {
       if (!user.isActive) {
         throw new HttpException(
           {
-            message: messageException.USER_IN_ACTIVE,
-            error: messageException.USER_UNAUTHORIZATION,
+            message: message.USER_IN_ACTIVE,
+            error: message.USER_UNAUTHORIZATION,
           },
           HttpStatus.UNAUTHORIZED
         );
@@ -258,7 +258,7 @@ export class AuthService {
       userId
     );
     if (!user) {
-      throw new UnauthorizedException(messageException.TOKEN_INVALID);
+      throw new UnauthorizedException(message.TOKEN_INVALID);
     }
 
     const tokens = await this.generateTokens(user.id, user.email);
@@ -277,30 +277,30 @@ export class AuthService {
 
       const user = await this.usersService.findByEmail(payload.email);
       if (!user) {
-        throw new BadRequestException(messageException.USER_NOT_FOUND);
+        throw new BadRequestException(message.USER_NOT_FOUND);
       }
 
       // Nếu user đã verify = true -> xóa currentVerifyToken -> trả về message
       if (user.isVerified == true) {
         await this.usersService.update(user.id, { currentVerifyToken: null });
-        return { message: messageException.EMAIL_ALREADY_VERIFIED };
+        return { message: message.EMAIL_ALREADY_VERIFIED };
       }
 
       // Giải token xem còn hạn không ?
       await this.usersService.verifyByToken(user.id, token);
 
-      return { message: messageException.EMAIL_VERIFICATION_SUCCESS };
+      return { message: message.EMAIL_VERIFICATION_SUCCESS };
     } catch (error) {
       if (error.name === "TokenExpiredError") {
-        throw new BadRequestException(messageException.TOKEN_EXPIRED);
+        throw new BadRequestException(message.TOKEN_EXPIRED);
       }
       if (error.name === "JsonWebTokenError") {
-        throw new BadRequestException(messageException.TOKEN_INVALID);
+        throw new BadRequestException(message.TOKEN_INVALID);
       }
       if (error.message === "Token invalid or already used") {
-        throw new BadRequestException(messageException.TOKEN_ALREADY_USED);
+        throw new BadRequestException(message.TOKEN_ALREADY_USED);
       }
-      throw new BadRequestException(messageException.VERIFY_TOKEN_EXPIRED);
+      throw new BadRequestException(message.VERIFY_TOKEN_EXPIRED);
     }
   }
 
@@ -350,7 +350,7 @@ export class AuthService {
     const user = await this.usersService.findByEmail(email);
 
     if (!user) {
-      throw new NotFoundException(messageException.USER_NOT_FOUND);
+      throw new NotFoundException(message.USER_NOT_FOUND);
     }
 
     const resetToken = this.jwtService.sign(
@@ -365,7 +365,7 @@ export class AuthService {
     await this.emailService.sendResetPasswordEmail(user.email, resetToken);
 
     return {
-      message: messageException.PASSWORD_RESET_EMAIL_SENT,
+      message: message.PASSWORD_RESET_EMAIL_SENT,
     };
   }
 
@@ -382,7 +382,7 @@ export class AuthService {
 
     const user = await this.usersService.findByEmail(payload.email);
     if (!user) {
-      throw new NotFoundException(messageException.USER_NOT_FOUND);
+      throw new NotFoundException(message.USER_NOT_FOUND);
     }
 
     // Cập nhật password
@@ -391,7 +391,7 @@ export class AuthService {
     });
 
     return {
-      message: messageException.PASSWORD_RESET_SUCCESS,
+      message: message.PASSWORD_RESET_SUCCESS,
     };
   }
 }

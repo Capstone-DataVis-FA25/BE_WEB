@@ -10,7 +10,7 @@ import { UpdateUserDto } from "./dto/update-user.dto";
 import { User, UserWithoutPassword } from "../../types/user.types";
 import * as bcrypt from "bcryptjs";
 import { ChangePasswordDTO } from "./dto/change-password.dto";
-import { messageException } from "src/constant/message-exception-config";
+import { message } from "src/constant/message-exception-config";
 
 @Injectable()
 export class UsersService {
@@ -91,16 +91,16 @@ export class UsersService {
 
   async remove(id: string, email?: string): Promise<void> {
     if (!email) {
-      throw new BadRequestException(messageException.USER_NOT_FOUND);
+      throw new BadRequestException(message.USER_NOT_FOUND);
     }
     const user = await this.prisma.user.findUnique({
       where: { id },
     });
     if (!user) {
-      throw new NotFoundException(messageException.USER_NOT_FOUND);
+      throw new NotFoundException(message.USER_NOT_FOUND);
     }
     if (user.email !== email) {
-      throw new UnauthorizedException(messageException.USER_UNAUTHORIZATION);
+      throw new UnauthorizedException(message.USER_UNAUTHORIZATION);
     }
     await this.prisma.user.delete({
       where: { id },
@@ -161,16 +161,16 @@ export class UsersService {
     });
 
     if (!user) {
-      throw new BadRequestException(messageException.USER_NOT_FOUND);
+      throw new BadRequestException(message.USER_NOT_FOUND);
     }
 
     // Kiểm tra từng điều kiện một cách rõ ràng
     if (user.isVerified) {
-      throw new BadRequestException(messageException.EMAIL_ALREADY_VERIFY);
+      throw new BadRequestException(message.EMAIL_ALREADY_VERIFY);
     }
 
     if (user.currentVerifyToken !== token) {
-      throw new BadRequestException(messageException.VERIFY_TOKEN_EXPIRED);
+      throw new BadRequestException(message.VERIFY_TOKEN_EXPIRED);
     }
 
     // Token hợp lệ, tiến hành verify
@@ -191,11 +191,11 @@ export class UsersService {
     });
 
     if (!user) {
-      throw new NotFoundException(messageException.USER_NOT_FOUND);
+      throw new NotFoundException(message.USER_NOT_FOUND);
     }
 
     if (dto.new_password !== dto.confirm_password) {
-      throw new BadRequestException(messageException.USER_UNAUTHORIZATION);
+      throw new BadRequestException(message.USER_UNAUTHORIZATION);
     }
 
     const isOldPasswordValid = await bcrypt.compare(
@@ -203,7 +203,7 @@ export class UsersService {
       user.password
     );
     if (!isOldPasswordValid) {
-      throw new UnauthorizedException(messageException.USER_UNAUTHORIZATION);
+      throw new UnauthorizedException(message.USER_UNAUTHORIZATION);
     }
 
     const hashedNewPassword = await bcrypt.hash(dto.new_password, 10);
@@ -214,7 +214,7 @@ export class UsersService {
     });
 
     return {
-      message: messageException.PASSWORD_RESET_SUCCESS,
+      message: message.PASSWORD_RESET_SUCCESS,
     };
   }
 

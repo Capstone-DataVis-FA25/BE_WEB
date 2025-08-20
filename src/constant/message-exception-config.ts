@@ -1,5 +1,5 @@
 // message-exception.config.ts
-export const messageException = {
+export const message = {
   USER_NOT_FOUND: "User not found",
   USER_INVALID_CREDENTIAL: "Invalid credentials",
   USER_IN_ACTIVE: "Account is deactivated",
