@@ -24,7 +24,7 @@ import { EmailService } from "../email/email.service";
 import { GoogleAuthService } from "./google-auth.service";
 import { ForgotPasswordDto } from "./dto/forgot-password.dto";
 import { ResetPasswordDto } from "./dto/reset-password.dto";
-import { message } from "src/constant/message-exception-config";
+import { Messages } from "src/constant/message-exception-config";
 
 export interface GoogleUser {
   email: string;
@@ -53,7 +53,7 @@ export class AuthService {
 
     if (existingUser) {
       if (existingUser.isVerified) {
-        throw new UnauthorizedException(message.USER_ALREADY_EXIST);
+        throw new UnauthorizedException(Messages.USER_ALREADY_EXIST);
       } else {
         // Xóa currentVerifyToken cũ
         await this.usersService.update(existingUser.id, {
@@ -81,7 +81,7 @@ export class AuthService {
           user: { ...existingUser, password: undefined },
           tokens: null,
           verifyToken,
-          message: message.EMAIL_VERIFICATION_RESEND_SUCCESS,
+          message: Messages.EMAIL_VERIFICATION_RESEND_SUCCESS,
         };
       }
     }
@@ -118,17 +118,17 @@ export class AuthService {
       user: userResponse,
       tokens,
       verifyToken,
-      message: message.EMAIL_VERIFICATION_SEND_SUCCESS,
+      message: Messages.EMAIL_VERIFICATION_SEND_SUCCESS,
     };
   }
 
   async resendVerifyEmail(email: string) {
     const user = await this.usersService.findByEmail(email);
     if (!user) {
-      return { message: message.USER_NOT_FOUND };
+      return { message: Messages.USER_NOT_FOUND };
     }
     if (user.isVerified == true) {
-      return { message: message.EMAIL_ALREADY_VERIFY };
+      return { message: Messages.EMAIL_ALREADY_VERIFY };
     }
     // Nếu chưa verify, gửi lại email xác thực
     // Xóa currentVerifyToken nếu có
@@ -142,7 +142,7 @@ export class AuthService {
     });
 
     await this.emailService.sendEmailVerification(user.email, verifyToken);
-    return { message: message.EMAIL_VERIFICATION_RESEND_SUCCESS };
+    return { message: Messages.EMAIL_VERIFICATION_RESEND_SUCCESS };
   }
 
   async signIn(
@@ -150,14 +150,14 @@ export class AuthService {
   ): Promise<{ user: Partial<User>; tokens: any }> {
     const user = await this.validateUser(signInDto.email, signInDto.password);
     if (!user) {
-      throw new UnauthorizedException(message.USER_UNAUTHORIZATION);
+      throw new UnauthorizedException(Messages.USER_UNAUTHORIZATION);
     }
 
     if (!user.isActive) {
-      throw new UnauthorizedException(message.USER_IN_ACTIVE);
+      throw new UnauthorizedException(Messages.USER_IN_ACTIVE);
     }
     if (!user.isVerified) {
-      throw new UnauthorizedException(message.USER_NOT_VERIFIED);
+      throw new UnauthorizedException(Messages.USER_NOT_VERIFIED);
     }
 
     const tokens = await this.generateTokens(user.id, user.email);
@@ -183,11 +183,8 @@ export class AuthService {
 
       if (!user.isActive) {
         throw new HttpException(
-          {
-            message: message.USER_IN_ACTIVE,
-            error: message.USER_UNAUTHORIZATION,
-          },
-          HttpStatus.UNAUTHORIZED
+          Messages.USER_IN_ACTIVE,
+          HttpStatus.BAD_REQUEST
         );
       }
 
@@ -197,12 +194,7 @@ export class AuthService {
       const { password, ...userResponse } = user;
       return { user: userResponse, tokens };
     } catch (error) {
-      throw new BadRequestException({
-        statusCode: HttpStatus.INTERNAL_SERVER_ERROR,
-        error: error.message,
-        message:
-          "Có lỗi xảy ra với Google authentication, vui lòng thử lại sau",
-      });
+      throw new BadRequestException(Messages.GOOGLE_AUTH_ERROR);
     }
   }
 
@@ -216,11 +208,8 @@ export class AuthService {
 
       if (!user.isActive) {
         throw new HttpException(
-          {
-            message: message.USER_IN_ACTIVE,
-            error: message.USER_UNAUTHORIZATION,
-          },
-          HttpStatus.UNAUTHORIZED
+          Messages.USER_IN_ACTIVE,
+          HttpStatus.BAD_REQUEST
         );
       }
 
@@ -235,12 +224,7 @@ export class AuthService {
 
       return { user: userResponse, tokens };
     } catch (error) {
-      throw new BadRequestException({
-        statusCode: HttpStatus.INTERNAL_SERVER_ERROR,
-        error: error.message,
-        message:
-          "Có lỗi xảy ra với Google authentication, vui lòng thử lại sau",
-      });
+      throw new BadRequestException(Messages.GOOGLE_AUTH_ERROR);
     }
   }
 
@@ -258,7 +242,7 @@ export class AuthService {
       userId
     );
     if (!user) {
-      throw new UnauthorizedException(message.TOKEN_INVALID);
+      throw new UnauthorizedException(Messages.TOKEN_INVALID);
     }
 
     const tokens = await this.generateTokens(user.id, user.email);
@@ -277,30 +261,30 @@ export class AuthService {
 
       const user = await this.usersService.findByEmail(payload.email);
       if (!user) {
-        throw new BadRequestException(message.USER_NOT_FOUND);
+        throw new BadRequestException(Messages.USER_NOT_FOUND);
       }
 
       // Nếu user đã verify = true -> xóa currentVerifyToken -> trả về message
       if (user.isVerified == true) {
         await this.usersService.update(user.id, { currentVerifyToken: null });
-        return { message: message.EMAIL_ALREADY_VERIFIED };
+        return { message: Messages.EMAIL_ALREADY_VERIFIED };
       }
 
       // Giải token xem còn hạn không ?
       await this.usersService.verifyByToken(user.id, token);
 
-      return { message: message.EMAIL_VERIFICATION_SUCCESS };
+      return { message: Messages.EMAIL_VERIFICATION_SUCCESS };
     } catch (error) {
       if (error.name === "TokenExpiredError") {
-        throw new BadRequestException(message.TOKEN_EXPIRED);
+        throw new BadRequestException(Messages.TOKEN_EXPIRED);
       }
       if (error.name === "JsonWebTokenError") {
-        throw new BadRequestException(message.TOKEN_INVALID);
+        throw new BadRequestException(Messages.TOKEN_INVALID);
       }
       if (error.message === "Token invalid or already used") {
-        throw new BadRequestException(message.TOKEN_ALREADY_USED);
+        throw new BadRequestException(Messages.TOKEN_ALREADY_USED);
       }
-      throw new BadRequestException(message.VERIFY_TOKEN_EXPIRED);
+      throw new BadRequestException(Messages.VERIFY_TOKEN_EXPIRED);
     }
   }
 
@@ -350,7 +334,7 @@ export class AuthService {
     const user = await this.usersService.findByEmail(email);
 
     if (!user) {
-      throw new NotFoundException(message.USER_NOT_FOUND);
+      throw new NotFoundException(Messages.USER_NOT_FOUND);
     }
 
     const resetToken = this.jwtService.sign(
@@ -365,7 +349,7 @@ export class AuthService {
     await this.emailService.sendResetPasswordEmail(user.email, resetToken);
 
     return {
-      message: message.PASSWORD_RESET_EMAIL_SENT,
+      message: Messages.PASSWORD_RESET_EMAIL_SENT,
     };
   }
 
@@ -382,7 +366,7 @@ export class AuthService {
 
     const user = await this.usersService.findByEmail(payload.email);
     if (!user) {
-      throw new NotFoundException(message.USER_NOT_FOUND);
+      throw new NotFoundException(Messages.USER_NOT_FOUND);
     }
 
     // Cập nhật password
@@ -391,7 +375,7 @@ export class AuthService {
     });
 
     return {
-      message: message.PASSWORD_RESET_SUCCESS,
+      message: Messages.PASSWORD_RESET_SUCCESS,
     };
   }
 }
