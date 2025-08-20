@@ -22,7 +22,7 @@ import { ForgotPasswordDto } from "./dto/forgot-password.dto";
 import { ResetPasswordDto } from "./dto/reset-password.dto";
 import { ApiBody } from "@nestjs/swagger";
 import { ResendVerifyEmailDto } from "./dto/resend-verify.dto";
-import { Messages } from "src/constant/message-exception-config";
+import { Messages } from "src/constant/message-config";
 
 export interface AuthRequest extends Request {
   user: {

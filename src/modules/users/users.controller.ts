@@ -35,6 +35,7 @@ export class UsersController {
 	@ApiOperation({ summary: 'Get all users' })
 	@ApiResponse({ status: 200, description: 'List of users' })
 	findAll() {
+		console.log('findAll');
 		return this.usersService.findAll();
 	}
 

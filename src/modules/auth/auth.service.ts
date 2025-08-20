@@ -24,7 +24,7 @@ import { EmailService } from "../email/email.service";
 import { GoogleAuthService } from "./google-auth.service";
 import { ForgotPasswordDto } from "./dto/forgot-password.dto";
 import { ResetPasswordDto } from "./dto/reset-password.dto";
-import { Messages } from "src/constant/message-exception-config";
+import { Messages } from "src/constant/message-config";
 
 export interface GoogleUser {
   email: string;
@@ -41,7 +41,7 @@ export class AuthService {
     private readonly jwtService: JwtService,
     private readonly emailService: EmailService,
     private readonly googleAuthService: GoogleAuthService
-  ) {}
+  ) { }
 
   async signUp(signUpDto: SignUpDto): Promise<{
     user: Partial<User>;
