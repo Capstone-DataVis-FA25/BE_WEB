@@ -18,7 +18,7 @@ enum UserRole {
 model User {
   id        String   @id @default(cuid())
   email     String   @unique
-  password  String
+  password  String?
   firstName String?
   lastName  String?
   role      UserRole @default(USER)
@@ -26,8 +26,10 @@ model User {
   isVerified Boolean @default(false)
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
+  
 
   currentHashedRefreshToken String?
+  currentVerifyToken String?
 
   @@map("users")
 }

@@ -20,6 +20,9 @@ import { GoogleAuthGuard } from "./guards/google.guard";
 import { ConfigService } from "@nestjs/config";
 import { ForgotPasswordDto } from "./dto/forgot-password.dto";
 import { ResetPasswordDto } from "./dto/reset-password.dto";
+import { ApiBody } from "@nestjs/swagger";
+import { ResendVerifyEmailDto } from "./dto/resend-verify.dto";
+import { Messages } from "src/constant/message-exception-config";
 
 export interface AuthRequest extends Request {
   user: {
@@ -114,11 +117,25 @@ export class AuthController {
   @ApiOperation({ summary: "Verify email" })
   @ApiResponse({ status: 200, description: "Email verified successfully" })
   async verifyEmail(@Query("token") token: string, @Res() res: Response) {
-    const result = await this.authService.verifyEmail(token);
-    const URL_VERIFY_EMAIL = `${this.configService.get("CLIENT_URL")}/verify-email-success`;
-    if (result == null) {
-      return res.status(400).json({ message: "Verify account fail" });
+    try {
+      const result = await this.authService.verifyEmail(token);
+      const URL_VERIFY_EMAIL_SUCCESS = `${this.configService.get("CLIENT_URL")}/verify-email-success`;
+      const URL_VERIFY_EMAIL_FAIL = `${this.configService.get("CLIENT_URL")}/verify-email-error`;
+
+      // Import constants để so sánh đúng
+      if (result.message === Messages.EMAIL_ALREADY_VERIFY) {
+        return res.redirect(URL_VERIFY_EMAIL_FAIL);
+      }
+      return res.redirect(URL_VERIFY_EMAIL_SUCCESS);
+    } catch (error) {
+      const URL_VERIFY_EMAIL_FAIL = `${this.configService.get("CLIENT_URL")}/verify-email-error`;
+      return res.redirect(URL_VERIFY_EMAIL_FAIL);
     }
-    return res.redirect(URL_VERIFY_EMAIL);
+  }
+
+  @Post("resend-verify-email")
+  @ApiBody({ type: ResendVerifyEmailDto })
+  async resendVerifyEmail(@Body() dto: ResendVerifyEmailDto) {
+    return this.authService.resendVerifyEmail(dto.email);
   }
 }

@@ -3,9 +3,9 @@ import { ConfigService } from "@nestjs/config";
 import { JwtService } from "@nestjs/jwt";
 import {
   BadRequestException,
-  ConflictException,
   Injectable,
   UnauthorizedException,
+  NotFoundException,
   HttpException,
   HttpStatus,
 } from "@nestjs/common";
@@ -20,11 +20,11 @@ import {
   access_token_public_key,
   refresh_token_private_key,
 } from "src/constraints/jwt.constraint";
-import * as fs from "fs";
 import { EmailService } from "../email/email.service";
 import { GoogleAuthService } from "./google-auth.service";
 import { ForgotPasswordDto } from "./dto/forgot-password.dto";
 import { ResetPasswordDto } from "./dto/reset-password.dto";
+import { Messages } from "src/constant/message-exception-config";
 
 export interface GoogleUser {
   email: string;
@@ -41,7 +41,7 @@ export class AuthService {
     private readonly jwtService: JwtService,
     private readonly emailService: EmailService,
     private readonly googleAuthService: GoogleAuthService
-  ) { }
+  ) {}
 
   async signUp(signUpDto: SignUpDto): Promise<{
     user: Partial<User>;
@@ -49,41 +49,100 @@ export class AuthService {
     message: string;
     verifyToken?: string;
   }> {
-    // Check if user exists
     const existingUser = await this.usersService.findByEmail(signUpDto.email);
 
     if (existingUser) {
-      throw new UnauthorizedException("User with this email already exists");
+      if (existingUser.isVerified) {
+        throw new UnauthorizedException(Messages.USER_ALREADY_EXIST);
+      } else {
+        // Xóa currentVerifyToken cũ
+        await this.usersService.update(existingUser.id, {
+          currentVerifyToken: null,
+        });
+
+        // Tạo verifyToken mới
+        const verifyToken = await this.generateVerifyToken(
+          existingUser.id,
+          existingUser.email
+        );
+
+        // Gán lại currentVerifyToken
+        await this.usersService.update(existingUser.id, {
+          currentVerifyToken: verifyToken,
+        });
+
+        // Gửi lại email xác thực
+        await this.emailService.sendEmailVerification(
+          existingUser.email,
+          verifyToken
+        );
+
+        return {
+          user: { ...existingUser, password: undefined },
+          tokens: null,
+          verifyToken,
+          message: Messages.EMAIL_VERIFICATION_RESEND_SUCCESS,
+        };
+      }
     }
 
-    // Create user
+    // Tạo user mới
     const user = await this.usersService.create({
       ...signUpDto,
       role: UserRole.USER,
       isVerified: false,
     });
 
-    // Generate tokens
-    const tokens = await this.generateTokens(user.id, user.email);
-
-    // Generate verify token using dedicated method
+    // Tạo verifyToken mới
     const verifyToken = await this.generateVerifyToken(user.id, user.email);
 
-    // Send verify email
+    // Gán currentVerifyToken
+    await this.usersService.update(user.id, {
+      currentVerifyToken: verifyToken,
+    });
+
+    // Gửi email xác thực
     await this.emailService.sendEmailVerification(user.email, verifyToken);
+
+    // Generate tokens
+    const tokens = await this.generateTokens(user.id, user.email);
 
     // Save refresh token
     await this.usersService.updateRefreshToken(user.id, tokens.refresh_token);
 
-    // Remove password from response
     const { password, ...userResponse } = user;
+
+    const updatedUser = await this.usersService.findOne(user.id);
 
     return {
       user: userResponse,
       tokens,
-      verifyToken: verifyToken,
-      message: "Email verification send success! Check mail",
+      verifyToken,
+      message: Messages.EMAIL_VERIFICATION_SEND_SUCCESS,
     };
+  }
+
+  async resendVerifyEmail(email: string) {
+    const user = await this.usersService.findByEmail(email);
+    if (!user) {
+      return { message: Messages.USER_NOT_FOUND };
+    }
+    if (user.isVerified == true) {
+      return { message: Messages.EMAIL_ALREADY_VERIFY };
+    }
+    // Nếu chưa verify, gửi lại email xác thực
+    // Xóa currentVerifyToken nếu có
+    await this.usersService.update(user.id, { currentVerifyToken: null });
+
+    // Tạo mới và update mới
+    const verifyToken = await this.generateVerifyToken(user.id, user.email);
+
+    await this.usersService.update(user.id, {
+      currentVerifyToken: verifyToken,
+    });
+
+    await this.emailService.sendEmailVerification(user.email, verifyToken);
+    return { message: Messages.EMAIL_VERIFICATION_RESEND_SUCCESS };
   }
 
   async signIn(
@@ -91,16 +150,14 @@ export class AuthService {
   ): Promise<{ user: Partial<User>; tokens: any }> {
     const user = await this.validateUser(signInDto.email, signInDto.password);
     if (!user) {
-      throw new UnauthorizedException("Invalid credentials");
+      throw new UnauthorizedException(Messages.USER_UNAUTHORIZATION);
     }
 
     if (!user.isActive) {
-      throw new UnauthorizedException("Account is deactivated");
+      throw new UnauthorizedException(Messages.USER_IN_ACTIVE);
     }
     if (!user.isVerified) {
-      throw new UnauthorizedException(
-        "Account is not verify ! Please check mail"
-      );
+      throw new UnauthorizedException(Messages.USER_NOT_VERIFIED);
     }
 
     const tokens = await this.generateTokens(user.id, user.email);
@@ -126,25 +183,18 @@ export class AuthService {
 
       if (!user.isActive) {
         throw new HttpException(
-          { message: "Account is deactivated", error: "Unauthorized" },
-          HttpStatus.UNAUTHORIZED
+          Messages.USER_IN_ACTIVE,
+          HttpStatus.BAD_REQUEST
         );
       }
 
       const tokens = await this.generateTokens(user.id, user.email);
       await this.usersService.updateRefreshToken(user.id, tokens.refresh_token);
 
-      // Remove password from response
       const { password, ...userResponse } = user;
-
       return { user: userResponse, tokens };
     } catch (error) {
-      throw new BadRequestException({
-        statusCode: HttpStatus.INTERNAL_SERVER_ERROR,
-        error: error.message,
-        message:
-          "Có lỗi xảy ra với Google authentication, vui lòng thử lại sau",
-      });
+      throw new BadRequestException(Messages.GOOGLE_AUTH_ERROR);
     }
   }
 
@@ -158,8 +208,8 @@ export class AuthService {
 
       if (!user.isActive) {
         throw new HttpException(
-          { message: "Account is deactivated", error: "Unauthorized" },
-          HttpStatus.UNAUTHORIZED
+          Messages.USER_IN_ACTIVE,
+          HttpStatus.BAD_REQUEST
         );
       }
 
@@ -169,14 +219,12 @@ export class AuthService {
       // Remove password from response
       const { password, ...userResponse } = user;
 
+      // Update is verified attribute via UsersService helper
+      await this.usersService.update(user.id, { currentVerifyToken: null });
+
       return { user: userResponse, tokens };
     } catch (error) {
-      throw new BadRequestException({
-        statusCode: HttpStatus.INTERNAL_SERVER_ERROR,
-        error: error.message,
-        message:
-          "Có lỗi xảy ra với Google authentication, vui lòng thử lại sau",
-      });
+      throw new BadRequestException(Messages.GOOGLE_AUTH_ERROR);
     }
   }
 
@@ -194,7 +242,7 @@ export class AuthService {
       userId
     );
     if (!user) {
-      throw new UnauthorizedException("Invalid refresh token");
+      throw new UnauthorizedException(Messages.TOKEN_INVALID);
     }
 
     const tokens = await this.generateTokens(user.id, user.email);
@@ -205,11 +253,6 @@ export class AuthService {
 
   async verifyEmail(token: string): Promise<any> {
     try {
-      // console.log(
-      //   "Using public key:",
-      //   access_token_public_key.substring(0, 100) + "..."
-      // );
-
       // Giải mã token với RSA public key
       const payload = this.jwtService.verify(token, {
         publicKey: access_token_public_key,
@@ -218,17 +261,30 @@ export class AuthService {
 
       const user = await this.usersService.findByEmail(payload.email);
       if (!user) {
-        throw new BadRequestException("User not found");
+        throw new BadRequestException(Messages.USER_NOT_FOUND);
       }
-      if (user.isVerified) {
-        return { message: "Email đã được xác thực trước đó." };
+
+      // Nếu user đã verify = true -> xóa currentVerifyToken -> trả về message
+      if (user.isVerified == true) {
+        await this.usersService.update(user.id, { currentVerifyToken: null });
+        return { message: Messages.EMAIL_ALREADY_VERIFIED };
       }
-      await this.usersService.update(user.id, { isVerified: true });
-      return { message: "Xác thực email thành công." };
+
+      // Giải token xem còn hạn không ?
+      await this.usersService.verifyByToken(user.id, token);
+
+      return { message: Messages.EMAIL_VERIFICATION_SUCCESS };
     } catch (error) {
-      throw new BadRequestException(
-        "Token xác thực không hợp lệ hoặc đã hết hạn"
-      );
+      if (error.name === "TokenExpiredError") {
+        throw new BadRequestException(Messages.TOKEN_EXPIRED);
+      }
+      if (error.name === "JsonWebTokenError") {
+        throw new BadRequestException(Messages.TOKEN_INVALID);
+      }
+      if (error.message === "Token invalid or already used") {
+        throw new BadRequestException(Messages.TOKEN_ALREADY_USED);
+      }
+      throw new BadRequestException(Messages.VERIFY_TOKEN_EXPIRED);
     }
   }
 
@@ -278,7 +334,7 @@ export class AuthService {
     const user = await this.usersService.findByEmail(email);
 
     if (!user) {
-      throw new Error("Email doesn't exist");
+      throw new NotFoundException(Messages.USER_NOT_FOUND);
     }
 
     const resetToken = this.jwtService.sign(
@@ -293,7 +349,7 @@ export class AuthService {
     await this.emailService.sendResetPasswordEmail(user.email, resetToken);
 
     return {
-      message: "Email reset password has been sent",
+      message: Messages.PASSWORD_RESET_EMAIL_SENT,
     };
   }
 
@@ -310,7 +366,7 @@ export class AuthService {
 
     const user = await this.usersService.findByEmail(payload.email);
     if (!user) {
-      throw new UnauthorizedException("User doesn't exist");
+      throw new NotFoundException(Messages.USER_NOT_FOUND);
     }
 
     // Cập nhật password
@@ -319,7 +375,7 @@ export class AuthService {
     });
 
     return {
-      message: "Password has been reset successfully",
+      message: Messages.PASSWORD_RESET_SUCCESS,
     };
   }
 }

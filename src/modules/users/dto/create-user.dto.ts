@@ -20,11 +20,10 @@ export class CreateUserDto {
   @IsNotEmpty()
   email: string;
 
-  @ApiProperty()
+  @ApiProperty({ required: false })
   @IsString()
-  @IsNotEmpty()
   @MinLength(6)
-  password: string;
+  password?: string;
 
   @ApiProperty({ required: false })
   @IsOptional()
@@ -45,4 +44,9 @@ export class CreateUserDto {
   @IsOptional()
   @IsEnum(UserRole)
   role?: UserRole;
+
+  @ApiProperty({ required: false })
+  @IsOptional()
+  @IsString()
+  currentVerifyToken?: string;
 }
