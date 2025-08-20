@@ -1,7 +1,7 @@
 export type User = {
   id: string;
   email: string;
-  password: string;
+  password: string | null;
   firstName: string | null;
   lastName: string | null;
   role: "USER" | "ADMIN";
