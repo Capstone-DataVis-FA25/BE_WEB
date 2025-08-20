@@ -22,6 +22,7 @@ import { ForgotPasswordDto } from "./dto/forgot-password.dto";
 import { ResetPasswordDto } from "./dto/reset-password.dto";
 import { ApiBody } from "@nestjs/swagger";
 import { ResendVerifyEmailDto } from "./dto/resend-verify.dto";
+import { messageException } from "src/constant/message-exception-config";
 
 export interface AuthRequest extends Request {
   user: {
@@ -122,7 +123,7 @@ export class AuthController {
       const URL_VERIFY_EMAIL_FAIL = `${this.configService.get("CLIENT_URL")}/verify-email-error`;
 
       // Import constants để so sánh đúng
-      if (result.message === "Email đã được xác thực trước đó.") {
+      if (result.message === messageException.EMAIL_ALREADY_VERIFY) {
         return res.redirect(URL_VERIFY_EMAIL_FAIL);
       }
       return res.redirect(URL_VERIFY_EMAIL_SUCCESS);

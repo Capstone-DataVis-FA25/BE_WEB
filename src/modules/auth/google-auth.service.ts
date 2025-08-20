@@ -46,7 +46,6 @@ export class GoogleAuthService {
           email,
           firstName: given_name || "",
           lastName: family_name || "",
-          password: Math.random().toString(36) + Date.now().toString(36),
           role: UserRole.USER,
           isVerified: true,
         });
@@ -63,7 +62,6 @@ export class GoogleAuthService {
       email,
       firstName: given_name || "",
       lastName: family_name || "",
-      password: Math.random().toString(36) + Date.now().toString(36),
       role: UserRole.USER,
       isVerified: true,
     });

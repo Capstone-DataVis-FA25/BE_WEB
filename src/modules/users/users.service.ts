@@ -10,11 +10,7 @@ import { UpdateUserDto } from "./dto/update-user.dto";
 import { User, UserWithoutPassword } from "../../types/user.types";
 import * as bcrypt from "bcryptjs";
 import { ChangePasswordDTO } from "./dto/change-password.dto";
-import {
-  EMAIL_ALREADY_VERIFY,
-  USER_NOT_FOUND,
-  VERIFY_TOKEN_EXPIRED,
-} from "src/constant/message-exception-config";
+import { messageException } from "src/constant/message-exception-config";
 
 @Injectable()
 export class UsersService {
@@ -95,16 +91,16 @@ export class UsersService {
 
   async remove(id: string, email?: string): Promise<void> {
     if (!email) {
-      throw new BadRequestException("Email is required to delete account");
+      throw new BadRequestException(messageException.USER_NOT_FOUND);
     }
     const user = await this.prisma.user.findUnique({
       where: { id },
     });
     if (!user) {
-      throw new NotFoundException("User not found");
+      throw new NotFoundException(messageException.USER_NOT_FOUND);
     }
     if (user.email !== email) {
-      throw new UnauthorizedException("Email is incorrect");
+      throw new UnauthorizedException(messageException.USER_UNAUTHORIZATION);
     }
     await this.prisma.user.delete({
       where: { id },
@@ -158,14 +154,6 @@ export class UsersService {
     });
   }
 
-  async markVerified(userId: string): Promise<User> {
-    const updated = await this.update(userId, {
-      currentVerifyToken: null,
-    } as any);
-
-    return updated as User;
-  }
-
   async verifyByToken(userId: string, token: string): Promise<User> {
     // Lấy user để kiểm tra chi tiết
     const user = await this.prisma.user.findUnique({
@@ -173,23 +161,16 @@ export class UsersService {
     });
 
     if (!user) {
-      throw new BadRequestException(USER_NOT_FOUND);
+      throw new BadRequestException(messageException.USER_NOT_FOUND);
     }
-
-    console.log(`VERIFY BY TOKEN - User ID: ${userId}`);
-    console.log(`VERIFY BY TOKEN - Token truyền vào: ${token}`);
-    console.log(
-      `VERIFY BY TOKEN - Current verify token: ${user.currentVerifyToken}`
-    );
-    console.log(`VERIFY BY TOKEN - Is verified: ${user.isVerified}`);
 
     // Kiểm tra từng điều kiện một cách rõ ràng
     if (user.isVerified) {
-      throw new BadRequestException(EMAIL_ALREADY_VERIFY);
+      throw new BadRequestException(messageException.EMAIL_ALREADY_VERIFY);
     }
 
     if (user.currentVerifyToken !== token) {
-      throw new BadRequestException(VERIFY_TOKEN_EXPIRED);
+      throw new BadRequestException(messageException.VERIFY_TOKEN_EXPIRED);
     }
 
     // Token hợp lệ, tiến hành verify
@@ -198,7 +179,6 @@ export class UsersService {
       currentVerifyToken: null,
     } as any);
 
-    console.log(`VERIFY BY TOKEN - User verified successfully: ${userId}`);
     return updated as User;
   }
 
@@ -211,13 +191,11 @@ export class UsersService {
     });
 
     if (!user) {
-      throw new NotFoundException(USER_NOT_FOUND);
+      throw new NotFoundException(messageException.USER_NOT_FOUND);
     }
 
     if (dto.new_password !== dto.confirm_password) {
-      throw new BadRequestException(
-        "New password and confirmation password do not match"
-      );
+      throw new BadRequestException(messageException.USER_UNAUTHORIZATION);
     }
 
     const isOldPasswordValid = await bcrypt.compare(
@@ -225,7 +203,7 @@ export class UsersService {
       user.password
     );
     if (!isOldPasswordValid) {
-      throw new UnauthorizedException("Old password is incorrect");
+      throw new UnauthorizedException(messageException.USER_UNAUTHORIZATION);
     }
 
     const hashedNewPassword = await bcrypt.hash(dto.new_password, 10);
@@ -236,7 +214,7 @@ export class UsersService {
     });
 
     return {
-      message: "Password changed successfully",
+      message: messageException.PASSWORD_RESET_SUCCESS,
     };
   }
 
