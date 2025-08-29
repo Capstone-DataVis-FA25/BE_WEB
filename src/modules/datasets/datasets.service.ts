@@ -26,9 +26,9 @@ export class DatasetsService {
                 data: {
                     userId,
                     data,
-                    name: name || null,
+                    name,
                     description: description || null,
-                    rowCount: data.length,  
+                    rowCount: data.length,
                     columnCount: firstRowLength,
                 },
                 omit: {

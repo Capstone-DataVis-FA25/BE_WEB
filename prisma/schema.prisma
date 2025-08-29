@@ -39,7 +39,7 @@ model User {
 
 model Dataset {
   id          String   @id @default(cuid())
-  name        String?  // Optional dataset name
+  name        String   // Required dataset name
   description String?  // Optional description
   data        Json     // Store the 2D array as JSON
   rowCount    Int      // Number of rows (for quick reference)

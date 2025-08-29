@@ -1,5 +1,5 @@
 import { ApiProperty } from '@nestjs/swagger';
-import { IsArray, IsOptional, IsString, ArrayMinSize } from 'class-validator';
+import { IsArray, IsOptional, IsString, ArrayMinSize, IsNotEmpty } from 'class-validator';
 
 export class CreateDatasetDto {
     @ApiProperty({
@@ -24,13 +24,13 @@ export class CreateDatasetDto {
     data: string[][];
 
     @ApiProperty({
-        description: 'Optional name for the dataset',
+        description: 'Name for the dataset',
         example: 'Customer Demographics Data',
-        required: false,
+        required: true,
     })
-    @IsOptional()
     @IsString()
-    name?: string;
+    @IsNotEmpty({ message: 'Dataset name is required' })
+    name: string;
 
     @ApiProperty({
         description: 'Optional description for the dataset',
