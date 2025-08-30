@@ -17,7 +17,10 @@ export class UsersService {
   constructor(private prismaService: PrismaService) { }
 
   async create(createUserDto: CreateUserDto): Promise<User> {
-    const hashedPassword = await bcrypt.hash(createUserDto.password, 10);
+    // Hash password only if provided (for Google OAuth users, password might be undefined)
+    const hashedPassword = createUserDto.password
+      ? await bcrypt.hash(createUserDto.password, 10)
+      : null;
 
     const user = await this.prismaService.prisma.user.create({
       data: {
