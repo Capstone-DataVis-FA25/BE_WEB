@@ -11,9 +11,12 @@ export type User = {
   updatedAt: Date;
   currentVerifyToken: string | null;
   currentHashedRefreshToken: string | null;
+  isSocialAccount: boolean;
 };
 
 export type UserWithoutPassword = Omit<
   User,
-  "password" | "currentHashedRefreshToken" | "currentVerifyToken"
+  | "password"
+  | "currentHashedRefreshToken"
+  | "currentVerifyToken"
 >;
