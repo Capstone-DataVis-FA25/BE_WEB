@@ -36,6 +36,10 @@ export class DatasetsService {
                 }
             });
         } catch (error) {
+            if (error.code === 'P2002') {
+                // Unique constraint violation
+                throw new HttpException('A dataset with this name already exists', HttpStatus.CONFLICT);
+            }
             if (error.code === 'P2003') {
                 throw new BadRequestException('Invalid user ID');
             }
