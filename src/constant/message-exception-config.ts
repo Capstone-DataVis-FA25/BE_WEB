@@ -1,5 +1,5 @@
 // message-exception.config.ts
-export const message = {
+export const Messages = {
   USER_NOT_FOUND: "User not found",
   USER_INVALID_CREDENTIAL: "Invalid credentials",
   USER_IN_ACTIVE: "Account is deactivated",
@@ -22,4 +22,5 @@ export const message = {
   TOKEN_INVALID: "Token is invalid",
   TOKEN_EXPIRED: "Token has expired",
   TOKEN_ALREADY_USED: "Token is invalid or already used",
+  
 };
