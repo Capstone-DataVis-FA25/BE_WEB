@@ -10,16 +10,19 @@ import { UpdateUserDto } from "./dto/update-user.dto";
 import { User, UserWithoutPassword } from "../../types/user.types";
 import * as bcrypt from "bcryptjs";
 import { ChangePasswordDTO } from "./dto/change-password.dto";
-import { Messages } from "src/constant/message-exception-config";
+import { Messages } from "src/constant/message-config";
 
 @Injectable()
 export class UsersService {
-  constructor(private prisma: PrismaService) {}
+  constructor(private prismaService: PrismaService) { }
 
   async create(createUserDto: CreateUserDto): Promise<User> {
-    const hashedPassword = await bcrypt.hash(createUserDto.password, 10);
+    // Hash password only if provided (for Google OAuth users, password might be undefined)
+    const hashedPassword = createUserDto.password
+      ? await bcrypt.hash(createUserDto.password, 10)
+      : null;
 
-    const user = await this.prisma.user.create({
+    const user = await this.prismaService.prisma.user.create({
       data: {
         ...createUserDto,
         password: hashedPassword,
@@ -31,16 +34,11 @@ export class UsersService {
   }
 
   async findAll(): Promise<UserWithoutPassword[]> {
-    const users = await this.prisma.user.findMany({
-      select: {
-        id: true,
-        email: true,
-        firstName: true,
-        lastName: true,
-        role: true,
-        isActive: true,
-        createdAt: true,
-        updatedAt: true,
+    const users = await this.prismaService.prisma.user.findMany({
+      omit: {
+        password: true,
+        currentHashedRefreshToken: true,
+        currentVerifyToken: true,
       },
     });
 
@@ -48,26 +46,21 @@ export class UsersService {
   }
 
   async findOne(id: string): Promise<UserWithoutPassword | null> {
-    const user = await this.prisma.user.findUnique({
+    const user = await this.prismaService.prisma.user.findUnique({
       where: { id },
-      select: {
-        id: true,
-        email: true,
-        firstName: true,
-        lastName: true,
-        role: true,
-        isActive: true,
-        isVerified: true,
-        createdAt: true,
-        updatedAt: true,
+      omit: {
+        password: true,
+        currentHashedRefreshToken: true,
+        currentVerifyToken: true,
       },
     });
 
+    console.log(user);
     return user as UserWithoutPassword | null;
   }
 
   async findByEmail(email: string): Promise<User | null> {
-    const user = await this.prisma.user.findUnique({
+    const user = await this.prismaService.prisma.user.findUnique({
       where: { email },
     });
 
@@ -81,7 +74,7 @@ export class UsersService {
       updateData.password = await bcrypt.hash(updateUserDto.password, 10);
     }
 
-    const user = await this.prisma.user.update({
+    const user = await this.prismaService.prisma.user.update({
       where: { id },
       data: updateData,
     });
@@ -93,7 +86,7 @@ export class UsersService {
     if (!email) {
       throw new BadRequestException(Messages.USER_NOT_FOUND);
     }
-    const user = await this.prisma.user.findUnique({
+    const user = await this.prismaService.prisma.user.findUnique({
       where: { id },
     });
     if (!user) {
@@ -102,7 +95,7 @@ export class UsersService {
     if (user.email !== email) {
       throw new UnauthorizedException(Messages.USER_UNAUTHORIZATION);
     }
-    await this.prisma.user.delete({
+    await this.prismaService.prisma.user.delete({
       where: { id },
     });
   }
@@ -113,7 +106,7 @@ export class UsersService {
   ): Promise<void> {
     const hashedRefreshToken = await bcrypt.hash(refreshToken, 10);
 
-    await this.prisma.user.update({
+    await this.prismaService.prisma.user.update({
       where: { id: userId },
       data: {
         currentHashedRefreshToken: hashedRefreshToken,
@@ -125,7 +118,7 @@ export class UsersService {
     refreshToken: string,
     userId: string
   ): Promise<User | null> {
-    const user = await this.prisma.user.findUnique({
+    const user = await this.prismaService.prisma.user.findUnique({
       where: { id: userId },
     });
 
@@ -146,7 +139,7 @@ export class UsersService {
   }
 
   async removeRefreshToken(userId: string): Promise<void> {
-    await this.prisma.user.update({
+    await this.prismaService.prisma.user.update({
       where: { id: userId },
       data: {
         currentHashedRefreshToken: null,
@@ -156,7 +149,7 @@ export class UsersService {
 
   async verifyByToken(userId: string, token: string): Promise<User> {
     // Lấy user để kiểm tra chi tiết
-    const user = await this.prisma.user.findUnique({
+    const user = await this.prismaService.prisma.user.findUnique({
       where: { id: userId },
     });
 
@@ -186,7 +179,7 @@ export class UsersService {
     userId: string,
     dto: ChangePasswordDTO
   ): Promise<{ message: string }> {
-    const user = await this.prisma.user.findUnique({
+    const user = await this.prismaService.prisma.user.findUnique({
       where: { id: userId },
     });
 
@@ -208,7 +201,7 @@ export class UsersService {
 
     const hashedNewPassword = await bcrypt.hash(dto.new_password, 10);
 
-    await this.prisma.user.update({
+    await this.prismaService.prisma.user.update({
       where: { id: userId },
       data: { password: hashedNewPassword },
     });
@@ -224,7 +217,7 @@ export class UsersService {
     updateUserdto: UpdateUserDto
   ): Promise<{ user: Partial<User> }> {
     // Update user profile
-    const updatedUser = await this.prisma.user.update({
+    const updatedUser = await this.prismaService.prisma.user.update({
       where: { id: userId },
       data: {
         firstName: updateUserdto.firstName,
