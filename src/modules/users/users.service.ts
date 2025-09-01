@@ -54,8 +54,6 @@ export class UsersService {
         currentVerifyToken: true,
       },
     });
-
-    console.log(user);
     return user as UserWithoutPassword | null;
   }
 

@@ -12,6 +12,7 @@ import { AuthModule } from "@modules/auth/auth.module";
 import { UsersModule } from "@modules/users/users.module";
 import { PrismaModule } from "./prisma/prisma.module";
 import { EmailModule } from "@modules/email/email.module";
+import { DatasetsModule } from "@modules/datasets/datasets.module";
 
 @Module({
   imports: [
@@ -38,6 +39,7 @@ import { EmailModule } from "@modules/email/email.module";
     AuthModule,
     UsersModule,
     EmailModule,
+    DatasetsModule,
   ],
   controllers: [AppController],
   providers: [
@@ -48,4 +50,4 @@ import { EmailModule } from "@modules/email/email.module";
     },
   ],
 })
-export class AppModule {}
+export class AppModule { }
