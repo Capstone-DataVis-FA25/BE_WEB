@@ -28,7 +28,6 @@ export class DatasetsController {
     @ApiResponse({ status: 201, description: 'Dataset created successfully' })
     @ApiBody({ type: CreateDatasetDto })
     create(@Body() createDatasetDto: CreateDatasetDto, @Request() req: AuthRequest) {
-        // TODO: Implement dataset creation
         return this.datasetsService.create(createDatasetDto, req.user.userId);
     }
 

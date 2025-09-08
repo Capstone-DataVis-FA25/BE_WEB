@@ -10,16 +10,6 @@ export class DatasetsService {
     async create(createDatasetDto: CreateDatasetDto, userId: string) {
         const { data, name, description } = createDatasetDto;
 
-        // Only validate what DTO doesn't cover - consistent column count
-        const firstRowLength = data[0].length;
-        const hasInconsistentColumns = data.some(row =>
-            row.length !== firstRowLength
-        );
-
-        if (hasInconsistentColumns) {
-            throw new BadRequestException('All rows must have the same number of columns');
-        }
-
         // Database operation with error handling
         try {
             return await this.prismaService.prisma.dataset.create({
@@ -29,7 +19,7 @@ export class DatasetsService {
                     name,
                     description: description || null,
                     rowCount: data.length,
-                    columnCount: firstRowLength,
+                    columnCount: data[0].length,
                 },
                 omit: {
                     data: true
