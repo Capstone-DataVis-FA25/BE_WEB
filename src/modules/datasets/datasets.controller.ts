@@ -28,7 +28,6 @@ export class DatasetsController {
     @ApiResponse({ status: 201, description: 'Dataset created successfully' })
     @ApiBody({ type: CreateDatasetDto })
     create(@Body() createDatasetDto: CreateDatasetDto, @Request() req: AuthRequest) {
-        // TODO: Implement dataset creation
         return this.datasetsService.create(createDatasetDto, req.user.userId);
     }
 
@@ -36,7 +35,6 @@ export class DatasetsController {
     @ApiOperation({ summary: 'Get all datasets for the authenticated user' })
     @ApiResponse({ status: 200, description: 'List of datasets retrieved successfully' })
     findAll(@Request() req: AuthRequest) {
-        // TODO: Implement get all datasets for user
         return this.datasetsService.findAll(req.user.userId);
     }
 
@@ -45,7 +43,6 @@ export class DatasetsController {
     @ApiResponse({ status: 200, description: 'Dataset retrieved successfully' })
     @ApiResponse({ status: 404, description: 'Dataset not found' })
     findOne(@Param('id') id: string, @Request() req: AuthRequest) {
-        // TODO: Implement get dataset by ID
         return this.datasetsService.findOne(id, req.user.userId);
     }
 
@@ -59,7 +56,6 @@ export class DatasetsController {
         @Body() updateDatasetDto: UpdateDatasetDto,
         @Request() req: AuthRequest,
     ) {
-        // TODO: Implement dataset update
         return this.datasetsService.update(id, updateDatasetDto, req.user.userId);
     }
 
@@ -68,7 +64,6 @@ export class DatasetsController {
     @ApiResponse({ status: 200, description: 'Dataset deleted successfully' })
     @ApiResponse({ status: 404, description: 'Dataset not found' })
     remove(@Param('id') id: string, @Request() req: AuthRequest) {
-        // TODO: Implement dataset deletion
         return this.datasetsService.remove(id, req.user.userId);
     }
 }

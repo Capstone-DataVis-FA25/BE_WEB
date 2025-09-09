@@ -10,16 +10,6 @@ export class DatasetsService {
     async create(createDatasetDto: CreateDatasetDto, userId: string) {
         const { data, name, description } = createDatasetDto;
 
-        // Only validate what DTO doesn't cover - consistent column count
-        const firstRowLength = data[0].length;
-        const hasInconsistentColumns = data.some(row =>
-            row.length !== firstRowLength
-        );
-
-        if (hasInconsistentColumns) {
-            throw new BadRequestException('All rows must have the same number of columns');
-        }
-
         // Database operation with error handling
         try {
             return await this.prismaService.prisma.dataset.create({
@@ -29,10 +19,17 @@ export class DatasetsService {
                     name,
                     description: description || null,
                     rowCount: data.length,
-                    columnCount: firstRowLength,
+                    columnCount: data[0].length,
                 },
-                omit: {
-                    data: true
+                select: {
+                    id: true,
+                    name: true,
+                    description: true,
+                    rowCount: true,
+                    columnCount: true,
+                    createdAt: true,
+                    updatedAt: true,
+                    userId: true,
                 }
             });
         } catch (error) {
@@ -48,27 +45,119 @@ export class DatasetsService {
     }
 
     async findAll(userId: string) {
-        // TODO: Implement get all datasets for user
-        // Return datasets belonging to the user
-        throw new HttpException('Method not implemented', HttpStatus.NOT_IMPLEMENTED);
+        try {
+            const datasets = await this.prismaService.prisma.dataset.findMany({
+                where: { userId },
+                select: {
+                    id: true,
+                    name: true,
+                    description: true,
+                    rowCount: true,
+                    columnCount: true,
+                    createdAt: true,
+                    updatedAt: true,
+                    userId: true,
+                },
+                orderBy: { createdAt: 'desc' }
+            });
+            return datasets;
+        } catch (error) {
+            throw new BadRequestException(`Failed to fetch datasets: ${error.message}`);
+        }
     }
 
     async findOne(id: string, userId: string) {
-        // TODO: Implement get dataset by ID
-        // Check if dataset exists and belongs to user
-        throw new HttpException('Method not implemented', HttpStatus.NOT_IMPLEMENTED);
+        try {
+            const dataset = await this.prismaService.prisma.dataset.findUnique({
+                where: { id },
+                include: {
+                    user: {
+                        select: {
+                            id: true,
+                            email: true,
+                            firstName: true,
+                            lastName: true,
+                        }
+                    }
+                }
+            });
+
+            if (!dataset) {
+                throw new NotFoundException('Dataset not found');
+            }
+
+            if (dataset.userId !== userId) {
+                throw new ForbiddenException('You do not have access to this dataset');
+            }
+
+            return dataset;
+        } catch (error) {
+            if (error instanceof NotFoundException || error instanceof ForbiddenException) {
+                throw error;
+            }
+            throw new BadRequestException(`Failed to fetch dataset: ${error.message}`);
+        }
     }
 
     async update(id: string, updateDatasetDto: UpdateDatasetDto, userId: string) {
-        // TODO: Implement dataset update logic
-        // Check ownership and update dataset
-        throw new HttpException('Method not implemented', HttpStatus.NOT_IMPLEMENTED);
+        try {
+            // First validate ownership
+            await this.validateOwnership(id, userId);
+
+            const { data, name, description } = updateDatasetDto;
+            const updateData: any = {};
+
+            if (name !== undefined) updateData.name = name;
+            if (description !== undefined) updateData.description = description;
+            if (data !== undefined) {
+                updateData.data = data;
+                updateData.rowCount = data.length;
+                updateData.columnCount = data[0]?.length || 0;
+            }
+
+            const updatedDataset = await this.prismaService.prisma.dataset.update({
+                where: { id },
+                data: updateData,
+                select: {
+                    id: true,
+                    name: true,
+                    description: true,
+                    rowCount: true,
+                    columnCount: true,
+                    createdAt: true,
+                    updatedAt: true,
+                    userId: true,
+                }
+            });
+
+            return updatedDataset;
+        } catch (error) {
+            if (error instanceof NotFoundException || error instanceof ForbiddenException) {
+                throw error;
+            }
+            if (error.code === 'P2002') {
+                throw new HttpException('A dataset with this name already exists', HttpStatus.CONFLICT);
+            }
+            throw new BadRequestException(`Failed to update dataset: ${error.message}`);
+        }
     }
 
     async remove(id: string, userId: string) {
-        // TODO: Implement dataset deletion logic
-        // Check ownership and delete dataset   
-        throw new HttpException('Method not implemented', HttpStatus.NOT_IMPLEMENTED);
+        try {
+            // First validate ownership
+            await this.validateOwnership(id, userId);
+
+            await this.prismaService.prisma.dataset.delete({
+                where: { id }
+            });
+
+            return { message: 'Dataset deleted successfully' };
+        } catch (error) {
+            if (error instanceof NotFoundException || error instanceof ForbiddenException) {
+                throw error;
+            }
+            throw new BadRequestException(`Failed to delete dataset: ${error.message}`);
+        }
     }
 
     // Helper method to validate dataset ownership
