@@ -1,5 +1,5 @@
 import { ApiProperty } from '@nestjs/swagger';
-import { IsArray, IsString, ArrayMinSize, IsNotEmpty, MinLength, ValidateBy, ValidationOptions } from 'class-validator';
+import { IsArray, IsString, ArrayMinSize, IsNotEmpty, MinLength, ValidateBy, ValidationOptions, MaxLength } from 'class-validator';
 
 // Custom validator for consistent row lengths
 function IsConsistentRowLength(validationOptions?: ValidationOptions) {
@@ -49,7 +49,7 @@ export class CreateDatasetDto {
     })
     @IsString()
     @IsNotEmpty({ message: 'Dataset name is required' })
-    @MinLength(20, { message: 'Dataset name must be at least 20 characters long' })
+    @MaxLength(20, { message: 'Dataset name must be at most 20 characters long' })
     name: string;
 
     @ApiProperty({
@@ -59,6 +59,6 @@ export class CreateDatasetDto {
     })
     @IsString()
     @IsNotEmpty({ message: 'Dataset description is required' })
-    @MinLength(100, { message: 'Dataset description must be at least 100 characters long' })
+    @MaxLength(100, { message: 'Dataset description must be at most 100 characters long' })
     description: string;
 }

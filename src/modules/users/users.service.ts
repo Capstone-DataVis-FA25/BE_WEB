@@ -35,11 +35,11 @@ export class UsersService {
 
   async findAll(): Promise<UserWithoutPassword[]> {
     const users = await this.prismaService.prisma.user.findMany({
-      omit: {
+            omit: {
         password: true,
         currentHashedRefreshToken: true,
         currentVerifyToken: true,
-      },
+            }
     });
 
     return users as UserWithoutPassword[];
@@ -48,11 +48,11 @@ export class UsersService {
   async findOne(id: string): Promise<UserWithoutPassword | null> {
     const user = await this.prismaService.prisma.user.findUnique({
       where: { id },
-      omit: {
+           omit: {
         password: true,
         currentHashedRefreshToken: true,
         currentVerifyToken: true,
-      },
+            }
     });
     return user as UserWithoutPassword | null;
   }
