@@ -35,18 +35,11 @@ export class UsersService {
 
   async findAll(): Promise<UserWithoutPassword[]> {
     const users = await this.prismaService.prisma.user.findMany({
-      select: {
-        id: true,
-        email: true,
-        firstName: true,
-        lastName: true,
-        role: true,
-        isActive: true,
-        isVerified: true,
-        createdAt: true,
-        updatedAt: true,
-        isSocialAccount: true,
-      },
+            omit: {
+        password: true,
+        currentHashedRefreshToken: true,
+        currentVerifyToken: true,
+            }
     });
 
     return users as UserWithoutPassword[];
@@ -55,18 +48,11 @@ export class UsersService {
   async findOne(id: string): Promise<UserWithoutPassword | null> {
     const user = await this.prismaService.prisma.user.findUnique({
       where: { id },
-      select: {
-        id: true,
-        email: true,
-        firstName: true,
-        lastName: true,
-        role: true,
-        isActive: true,
-        isVerified: true,
-        createdAt: true,
-        updatedAt: true,
-        isSocialAccount: true,
-      },
+           omit: {
+        password: true,
+        currentHashedRefreshToken: true,
+        currentVerifyToken: true,
+            }
     });
     return user as UserWithoutPassword | null;
   }
@@ -132,20 +118,6 @@ export class UsersService {
   ): Promise<User | null> {
     const user = await this.prismaService.prisma.user.findUnique({
       where: { id: userId },
-      select: {
-        id: true,
-        email: true,
-        firstName: true,
-        lastName: true,
-        role: true,
-        isActive: true,
-        isVerified: true,
-        createdAt: true,
-        updatedAt: true,
-        isSocialAccount: true,
-        password: true,
-        currentHashedRefreshToken: true,
-      },
     });
 
     if (!user || !user.currentHashedRefreshToken) {
