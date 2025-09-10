@@ -24,7 +24,6 @@ model User {
   role      UserRole @default(USER)
   isActive  Boolean  @default(true)
   isVerified Boolean @default(false)
-  isSocialAccount Boolean @default(false)
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
   
