@@ -62,3 +62,15 @@ model DataHeader {
 
   data      Json     // Array of column values: [2020, 2021, ...] for this column
 }
+
+model DataHeader {
+  id        String   @id @default(cuid())
+  datasetId String
+  dataset   Dataset  @relation(fields: [datasetId], references: [id])
+
+  name      String   // Column name
+  type      String   // Column type: number/string/date
+  index     Int      // Current position in dataset
+
+  data      Json     // Array of column values: [2020, 2021, ...] for this column
+}
