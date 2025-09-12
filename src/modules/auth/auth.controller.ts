@@ -41,7 +41,7 @@ export class AuthController {
   constructor(
     private authService: AuthService,
     private configService: ConfigService
-  ) {}
+  ) { }
 
   @Post("signup")
   @ApiOperation({ summary: "User registration" })
@@ -52,8 +52,33 @@ export class AuthController {
 
   @HttpCode(HttpStatus.OK)
   @Post("signin")
-  @ApiOperation({ summary: "User login" })
-  @ApiResponse({ status: 200, description: "User logged in successfully" })
+  @ApiOperation({
+    summary: "User login",
+    description: "Authenticate user with email and password. Returns access token and refresh token upon successful authentication."
+  })
+  @ApiResponse({
+    status: 200,
+    description: "User logged in successfully",
+    schema: {
+      type: 'object',
+      properties: {
+        access_token: {
+          type: 'string',
+          description: 'JWT access token for authenticated requests'
+        },
+        refresh_token: {
+          type: 'string',
+          description: 'JWT refresh token for token renewal'
+        },
+        user: {
+          type: 'object',
+          description: 'User information'
+        }
+      }
+    }
+  })
+  @ApiResponse({ status: 401, description: "Invalid credentials" })
+  @ApiResponse({ status: 400, description: "Bad request - validation errors" })
   signIn(@Body() signInDto: SignInDto) {
     return this.authService.signIn(signInDto);
   }

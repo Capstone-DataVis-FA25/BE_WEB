@@ -1,50 +1,96 @@
 import { ApiProperty } from '@nestjs/swagger';
-import { IsArray, IsString, ArrayMinSize, IsNotEmpty, MinLength, ValidateBy, ValidationOptions, MaxLength } from 'class-validator';
+import { IsArray, IsString, ArrayMinSize, IsNotEmpty, MinLength, ValidateBy, ValidationOptions, MaxLength, IsInt, IsIn, ValidateNested } from 'class-validator';
+import { Type } from 'class-transformer';
 
-// Custom validator for consistent row lengths
-function IsConsistentRowLength(validationOptions?: ValidationOptions) {
+// DTO for individual data headers
+export class CreateDataHeaderDto {
+    @ApiProperty({
+        description: 'Column name',
+        example: 'Age'
+    })
+    @IsString()
+    @IsNotEmpty()
+    name: string;
+
+    @ApiProperty({
+        description: 'Column data type',
+        example: 'number',
+        enum: ['number', 'string', 'date']
+    })
+    @IsString()
+    @IsIn(['number', 'string', 'date'])
+    type: string;
+
+    @ApiProperty({
+        description: 'Column position index',
+        example: 0
+    })
+    @IsInt()
+    index: number;
+
+    @ApiProperty({
+        description: 'Array of column values',
+        example: [25, 30, 28, 35]
+    })
+    @IsArray()
+    data: any[];
+}
+
+// Custom validator for consistent header data lengths
+function IsConsistentHeaderDataLength(validationOptions?: ValidationOptions) {
     return ValidateBy({
-        name: 'isConsistentRowLength',
+        name: 'isConsistentHeaderDataLength',
         validator: {
-            validate: (value: any) => {
-                if (!Array.isArray(value) || value.length === 0) return true; // Let other validators handle empty arrays
+            validate: (headers: CreateDataHeaderDto[]) => {
+                if (!Array.isArray(headers) || headers.length === 0) return true;
 
-                const firstRowLength = value[0]?.length;
-                if (firstRowLength === undefined) return true; // Let other validators handle invalid rows
+                const firstDataLength = headers[0]?.data?.length;
+                if (firstDataLength === undefined) return true;
 
-                return value.every(row => Array.isArray(row) && row.length === firstRowLength);
+                return headers.every(header =>
+                    header.data && Array.isArray(header.data) && header.data.length === firstDataLength
+                );
             },
-            defaultMessage: () => 'All rows must have the same number of columns'
+            defaultMessage: () => 'All headers must have the same number of data values'
         }
     }, validationOptions);
 }
 
 export class CreateDatasetDto {
     @ApiProperty({
-        description: 'The dataset data as a 2D array of strings',
+        description: 'Array of data headers with their types and data',
         example: [
-            ['Name', 'Age', 'City', 'Country'],
-            ['John Doe', '28', 'New York', 'USA'],
-            ['Jane Smith', '34', 'London', 'UK'],
-        ],
-        type: 'array',
-        items: {
-            type: 'array',
-            items: {
-                type: 'string'
+            {
+                name: 'Name',
+                type: 'string',
+                index: 0,
+                data: ['John Doe', 'Jane Smith', 'Bob Johnson']
+            },
+            {
+                name: 'Age',
+                type: 'number',
+                index: 1,
+                data: [28, 34, 45]
+            },
+            {
+                name: 'City',
+                type: 'string',
+                index: 2,
+                data: ['New York', 'London', 'Paris']
             }
-        }
+        ],
+        type: 'array'
     })
     @IsArray()
-    @ArrayMinSize(2, { message: 'Dataset must have at least two rows (header and data)' })
-    @IsArray({ each: true })
-    @ArrayMinSize(1, { each: true, message: 'Each row must have at least one column' })
-    @IsConsistentRowLength()
-    data: string[][];
+    @ArrayMinSize(1, { message: 'Dataset must have at least one column' })
+    @ValidateNested({ each: true })
+    @Type(() => CreateDataHeaderDto)
+    @IsConsistentHeaderDataLength()
+    headers: CreateDataHeaderDto[];
 
     @ApiProperty({
         description: 'Name for the dataset',
-        example: 'Customer Demographics Data',
+        example: 'Customer Demographics',
         required: true,
     })
     @IsString()
@@ -55,9 +101,9 @@ export class CreateDatasetDto {
     @ApiProperty({
         description: 'Description for the dataset',
         example: 'Customer data including demographics and location information',
-        required: true,
+        required: false,
     })
     @IsString()
     @MaxLength(100, { message: 'Dataset description must be at most 100 characters long' })
-    description: string;
+    description?: string;
 }
