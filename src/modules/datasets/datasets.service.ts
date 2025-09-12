@@ -19,7 +19,7 @@ export class DatasetsService {
                     name,
                     description: description || null,
                     rowCount: data.length,
-                    columnCount: data[0].length,
+                    columnCount: data[0]?.length || 0,
                 },
                 select: {
                     id: true,
