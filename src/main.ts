@@ -12,15 +12,16 @@ async function bootstrap() {
 	const logger = new Logger(bootstrap.name);
 	const app = await NestFactory.create<NestExpressApplication>(AppModule);
 	app.enableCors({
-		origin: '*', 
+		origin: '*',
 		methods: 'GET,HEAD,PUT,PATCH,POST,DELETE',
-		allowedHeaders: '*', 
+		allowedHeaders: '*',
 	});
 	configSwagger(app);
 	const config_service = app.get(ConfigService);
 	app.useGlobalPipes(
 		new ValidationPipe({
 			whitelist: true,
+			transform: true,
 			exceptionFactory: (errors: ValidationError[]) =>
 				new BadRequestException({
 					message: 'Validation failed',
