@@ -58,7 +58,6 @@ export class CreateDatasetDto {
         required: true,
     })
     @IsString()
-    @IsNotEmpty({ message: 'Dataset description is required' })
     @MaxLength(100, { message: 'Dataset description must be at most 100 characters long' })
     description: string;
 }
