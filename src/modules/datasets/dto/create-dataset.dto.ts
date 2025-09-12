@@ -1,5 +1,5 @@
 import { ApiProperty } from '@nestjs/swagger';
-import { IsArray, IsString, ArrayMinSize, IsNotEmpty, MinLength, ValidateBy, ValidationOptions, MaxLength, IsInt, IsIn, ValidateNested } from 'class-validator';
+import { IsArray, IsString, ArrayMinSize, IsNotEmpty, MinLength, ValidateBy, ValidationOptions, MaxLength, IsInt, IsIn, ValidateNested, IsOptional } from 'class-validator';
 import { Type } from 'class-transformer';
 
 // DTO for individual data headers
@@ -103,6 +103,7 @@ export class CreateDatasetDto {
         example: 'Customer data including demographics and location information',
         required: false,
     })
+    @IsOptional()
     @IsString()
     @MaxLength(100, { message: 'Dataset description must be at most 100 characters long' })
     description?: string;
