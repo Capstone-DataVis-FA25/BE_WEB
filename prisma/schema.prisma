@@ -57,7 +57,7 @@ model Dataset {
 model DataHeader {
   id        String   @id @default(cuid())
   datasetId String
-  dataset   Dataset  @relation(fields: [datasetId], references: [id])
+  dataset   Dataset  @relation(fields: [datasetId], references: [id], onDelete: Cascade)
 
   name      String   // Column name
   type      String   // Column type: number/string/date
