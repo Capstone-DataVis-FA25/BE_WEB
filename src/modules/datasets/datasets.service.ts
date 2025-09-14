@@ -8,28 +8,36 @@ export class DatasetsService {
     constructor(private readonly prismaService: PrismaService) { }
 
     async create(createDatasetDto: CreateDatasetDto, userId: string) {
-        const { data, name, description } = createDatasetDto;
+        const { headers, name, description } = createDatasetDto;
+
+        // Calculate rowCount and columnCount from headers
+        const rowCount = headers.length > 0 ? headers[0].data.length : 0;
+        const columnCount = headers.length;
 
         // Database operation with error handling
         try {
             return await this.prismaService.prisma.dataset.create({
                 data: {
                     userId,
-                    data,
                     name,
                     description: description || null,
-                    rowCount: data.length,
-                    columnCount: data[0].length,
+                    rowCount,
+                    columnCount,
+                    headers: {
+                        create: headers.map(header => ({
+                            name: header.name,
+                            type: header.type,
+                            index: header.index,
+                            data: header.data,
+                        }))
+                    }
                 },
-                select: {
-                    id: true,
-                    name: true,
-                    description: true,
-                    rowCount: true,
-                    columnCount: true,
-                    createdAt: true,
-                    updatedAt: true,
-                    userId: true,
+                include: {
+                    headers: {
+                        orderBy: {
+                            index: 'asc'
+                        }
+                    }
                 }
             });
         } catch (error) {
@@ -48,15 +56,12 @@ export class DatasetsService {
         try {
             const datasets = await this.prismaService.prisma.dataset.findMany({
                 where: { userId },
-                select: {
-                    id: true,
-                    name: true,
-                    description: true,
-                    rowCount: true,
-                    columnCount: true,
-                    createdAt: true,
-                    updatedAt: true,
-                    userId: true,
+                include: {
+                    headers: {
+                        orderBy: {
+                            index: 'asc'
+                        }
+                    }
                 },
                 orderBy: { createdAt: 'desc' }
             });
@@ -77,6 +82,11 @@ export class DatasetsService {
                             email: true,
                             firstName: true,
                             lastName: true,
+                        }
+                    },
+                    headers: {
+                        orderBy: {
+                            index: 'asc'
                         }
                     }
                 }
@@ -104,29 +114,41 @@ export class DatasetsService {
             // First validate ownership
             await this.validateOwnership(id, userId);
 
-            const { data, name, description } = updateDatasetDto;
+            const { headers, name, description } = updateDatasetDto;
             const updateData: any = {};
 
             if (name !== undefined) updateData.name = name;
             if (description !== undefined) updateData.description = description;
-            if (data !== undefined) {
-                updateData.data = data;
-                updateData.rowCount = data.length;
-                updateData.columnCount = data[0]?.length || 0;
+
+            if (headers !== undefined) {
+                // Calculate new rowCount and columnCount from headers
+                const rowCount = headers.length > 0 ? headers[0].data.length : 0;
+                const columnCount = headers.length;
+
+                updateData.rowCount = rowCount;
+                updateData.columnCount = columnCount;
+
+                // Delete existing headers and create new ones
+                updateData.headers = {
+                    deleteMany: {},
+                    create: headers.map(header => ({
+                        name: header.name,
+                        type: header.type,
+                        index: header.index,
+                        data: header.data,
+                    }))
+                };
             }
 
             const updatedDataset = await this.prismaService.prisma.dataset.update({
                 where: { id },
                 data: updateData,
-                select: {
-                    id: true,
-                    name: true,
-                    description: true,
-                    rowCount: true,
-                    columnCount: true,
-                    createdAt: true,
-                    updatedAt: true,
-                    userId: true,
+                include: {
+                    headers: {
+                        orderBy: {
+                            index: 'asc'
+                        }
+                    }
                 }
             });
 

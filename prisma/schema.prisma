@@ -33,23 +33,52 @@ model User {
 
   // Relations
   datasets Dataset[]
+  charts    Chart[]
 
-  @@map("users")
 }
 
 model Dataset {
-  id          String   @id @default(cuid())
-  name        String   @unique // Required dataset name - must be unique
-  description String?  // Optional description
-  data        Json     // Store the 2D array as JSON
-  rowCount    Int      // Number of rows (for quick reference)
-  columnCount Int      // Number of columns (for quick reference)
-  createdAt   DateTime @default(now())
-  updatedAt   DateTime @updatedAt
-  
-  // Foreign key to User
-  userId      String
-  user        User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  id          String       @id @default(cuid())
+  name        String       @unique
+  description String?
+  rowCount    Int          // Number of rows
+  columnCount Int          // Number of columns
+  createdAt   DateTime     @default(now())
+  updatedAt   DateTime     @updatedAt
 
-  @@map("datasets")
+  // Relations
+  userId      String
+  user        User         @relation(fields: [userId], references: [id], onDelete: Cascade)
+  headers     DataHeader[] // One-to-many: each column is a DataHeader
+  charts  Chart[]
+
+}
+
+model DataHeader {
+  id        String   @id @default(cuid())
+  datasetId String
+  dataset   Dataset  @relation(fields: [datasetId], references: [id], onDelete: Cascade)
+
+  name      String   // Column name
+  type      String   // Column type: number/string/date
+  index     Int      // Current position in dataset
+
+  data      Json     // Array of column values: [2020, 2021, ...] for this column
+}
+
+model Chart {
+  id        String   @id @default(cuid())
+  name      String
+  description String?
+  type      String   // "bar", "line", "pie", etc.
+  config    Json     // column mapping, colors, etc.
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  // Relations
+  datasetId String
+  dataset   Dataset  @relation(fields: [datasetId], references: [id], onDelete: Cascade)
+
+  userId    String
+  user      User     @relation(fields: [userId], references: [id], onDelete: Cascade)
 }
