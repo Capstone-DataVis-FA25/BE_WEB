@@ -8,6 +8,7 @@ import {
     Delete,
     UseGuards,
     Request,
+    UsePipes,
 } from '@nestjs/common';
 import { ApiTags, ApiOperation, ApiResponse, ApiBearerAuth, ApiBody } from '@nestjs/swagger';
 import { DatasetsService } from './datasets.service';
@@ -15,6 +16,8 @@ import { CreateDatasetDto } from './dto/create-dataset.dto';
 import { UpdateDatasetDto } from './dto/update-dataset.dto';
 import { JwtAccessTokenGuard } from '@modules/auth/guards/jwt-access-token.guard';
 import { AuthRequest } from '@modules/auth/auth.controller';
+import { PayloadSizeLimitPipe } from '../../pipes/payload-size-limit.pipe';
+import { AppConstants } from '../../constant/app.constants';
 
 @ApiTags('datasets')
 @Controller('datasets')
@@ -27,6 +30,7 @@ export class DatasetsController {
     @ApiOperation({ summary: 'Create a new dataset' })
     @ApiResponse({ status: 201, description: 'Dataset created successfully' })
     @ApiBody({ type: CreateDatasetDto })
+    @UsePipes(new PayloadSizeLimitPipe(AppConstants.DATASET_PAYLOAD_MAX_SIZE))
     create(@Body() createDatasetDto: CreateDatasetDto, @Request() req: AuthRequest) {
         return this.datasetsService.create(createDatasetDto, req.user.userId);
     }
@@ -51,6 +55,7 @@ export class DatasetsController {
     @ApiResponse({ status: 200, description: 'Dataset updated successfully' })
     @ApiResponse({ status: 404, description: 'Dataset not found' })
     @ApiBody({ type: UpdateDatasetDto })
+    @UsePipes(new PayloadSizeLimitPipe(AppConstants.DATASET_PAYLOAD_MAX_SIZE))
     update(
         @Param('id') id: string,
         @Body() updateDatasetDto: UpdateDatasetDto,

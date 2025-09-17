@@ -2,6 +2,7 @@ import { Injectable, NotFoundException, ForbiddenException, HttpException, HttpS
 import { PrismaService } from '../../prisma/prisma.service';
 import { CreateDatasetDto } from './dto/create-dataset.dto';
 import { UpdateDatasetDto } from './dto/update-dataset.dto';
+import { Prisma } from '@prisma/client';
 
 @Injectable()
 export class DatasetsService {
@@ -115,7 +116,7 @@ export class DatasetsService {
             await this.validateOwnership(id, userId);
 
             const { headers, name, description } = updateDatasetDto;
-            const updateData: any = {};
+            const updateData: Prisma.DatasetUpdateInput = {};
 
             if (name !== undefined) updateData.name = name;
             if (description !== undefined) updateData.description = description;
