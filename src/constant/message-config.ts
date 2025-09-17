@@ -22,5 +22,4 @@ export const Messages = {
   TOKEN_INVALID: "Token is invalid",
   TOKEN_EXPIRED: "Token has expired",
   TOKEN_ALREADY_USED: "Token is invalid or already used",
-  
 };
