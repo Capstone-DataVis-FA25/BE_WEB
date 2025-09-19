@@ -14,6 +14,7 @@ import { PrismaModule } from "./prisma/prisma.module";
 import { EmailModule } from "@modules/email/email.module";
 import { DatasetsModule } from "@modules/datasets/datasets.module";
 import { ChartModule } from "@modules/chart/chart.module";
+import { KmsModule } from "@modules/kms/kms.module";
 
 @Module({
   imports: [
@@ -42,6 +43,7 @@ import { ChartModule } from "@modules/chart/chart.module";
     EmailModule,
     DatasetsModule,
     ChartModule,
+    KmsModule,
   ],
   controllers: [AppController],
   providers: [
@@ -52,4 +54,4 @@ import { ChartModule } from "@modules/chart/chart.module";
     },
   ],
 })
-export class AppModule { }
+export class AppModule {}
