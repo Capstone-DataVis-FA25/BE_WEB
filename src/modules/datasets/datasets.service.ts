@@ -3,10 +3,14 @@ import { PrismaService } from '../../prisma/prisma.service';
 import { CreateDatasetDto } from './dto/create-dataset.dto';
 import { UpdateDatasetDto } from './dto/update-dataset.dto';
 import { Prisma } from '@prisma/client';
+import { KmsService } from '../kms/kms.service';
 
 @Injectable()
 export class DatasetsService {
-    constructor(private readonly prismaService: PrismaService) { }
+    constructor(
+        private readonly prismaService: PrismaService,
+        private readonly kmsService: KmsService
+    ) { }
 
     async create(createDatasetDto: CreateDatasetDto, userId: string) {
         const { headers, name, description } = createDatasetDto;
@@ -14,6 +18,27 @@ export class DatasetsService {
         // Calculate rowCount and columnCount from headers
         const rowCount = headers.length > 0 ? headers[0].data.length : 0;
         const columnCount = headers.length;
+
+        // Encrypt each header's data
+        const encryptedHeaders = await Promise.all(
+            headers.map(async (header) => {
+                // Convert data array to JSON string for encryption
+                const dataString = JSON.stringify(header.data);
+
+                // Encrypt the data using KMS
+                const encryptionResult = await this.kmsService.encryptData(dataString);
+
+                return {
+                    name: header.name,
+                    type: header.type,
+                    index: header.index,
+                    encryptedData: encryptionResult.encryptedData,
+                    iv: encryptionResult.iv,
+                    authTag: encryptionResult.authTag,
+                    encryptedDataKey: encryptionResult.encryptedDataKey,
+                };
+            })
+        );
 
         // Database operation with error handling
         try {
@@ -25,12 +50,7 @@ export class DatasetsService {
                     rowCount,
                     columnCount,
                     headers: {
-                        create: headers.map(header => ({
-                            name: header.name,
-                            type: header.type,
-                            index: header.index,
-                            data: header.data,
-                        }))
+                        create: encryptedHeaders
                     }
                 },
                 include: {
@@ -57,15 +77,20 @@ export class DatasetsService {
         try {
             const datasets = await this.prismaService.prisma.dataset.findMany({
                 where: { userId },
-                include: {
-                    headers: {
-                        orderBy: {
-                            index: 'asc'
-                        }
-                    }
+                select: {
+                    id: true,
+                    name: true,
+                    description: true,
+                    rowCount: true,
+                    columnCount: true,
+                    createdAt: true,
+                    updatedAt: true,
+                    userId: true,
+                    // Don't include headers for performance
                 },
                 orderBy: { createdAt: 'desc' }
             });
+
             return datasets;
         } catch (error) {
             throw new BadRequestException(`Failed to fetch datasets: ${error.message}`);
@@ -101,7 +126,33 @@ export class DatasetsService {
                 throw new ForbiddenException('You do not have access to this dataset');
             }
 
-            return dataset;
+            // Decrypt headers
+            const decryptedDataset = {
+                ...dataset,
+                headers: await Promise.all(
+                    dataset.headers.map(async (header) => {
+                        const decryptedDataString = await this.kmsService.decryptData(
+                            header.encryptedData,
+                            header.encryptedDataKey,
+                            header.iv,
+                            header.authTag
+                        );
+
+                        const decryptedData = JSON.parse(decryptedDataString);
+
+                        return {
+                            id: header.id,
+                            datasetId: header.datasetId,
+                            name: header.name,
+                            type: header.type,
+                            index: header.index,
+                            data: decryptedData,
+                        };
+                    })
+                )
+            };
+
+            return decryptedDataset;
         } catch (error) {
             if (error instanceof NotFoundException || error instanceof ForbiddenException) {
                 throw error;
@@ -129,15 +180,31 @@ export class DatasetsService {
                 updateData.rowCount = rowCount;
                 updateData.columnCount = columnCount;
 
+                // Encrypt each header's data
+                const encryptedHeaders = await Promise.all(
+                    headers.map(async (header) => {
+                        // Convert data array to JSON string for encryption
+                        const dataString = JSON.stringify(header.data);
+
+                        // Encrypt the data using KMS
+                        const encryptionResult = await this.kmsService.encryptData(dataString);
+
+                        return {
+                            name: header.name,
+                            type: header.type,
+                            index: header.index,
+                            encryptedData: encryptionResult.encryptedData,
+                            iv: encryptionResult.iv,
+                            authTag: encryptionResult.authTag,
+                            encryptedDataKey: encryptionResult.encryptedDataKey,
+                        };
+                    })
+                );
+
                 // Delete existing headers and create new ones
                 updateData.headers = {
                     deleteMany: {},
-                    create: headers.map(header => ({
-                        name: header.name,
-                        type: header.type,
-                        index: header.index,
-                        data: header.data,
-                    }))
+                    create: encryptedHeaders
                 };
             }
 

@@ -62,7 +62,11 @@ model DataHeader {
   type      String   // Column type: number/string/date
   index     Int      // Current position in dataset
 
-  data      Json     // Array of column values: [2020, 2021, ...] for this column
+  // Encryption fields
+  encryptedData    String
+  iv               String
+  authTag          String
+  encryptedDataKey String
 }
 
 model Chart {
