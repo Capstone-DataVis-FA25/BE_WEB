@@ -16,7 +16,7 @@ enum UserRole {
 }
 
 model User {
-  id        String   @id @default(cuid())
+  id        String   @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
   email     String   @unique
   password  String?
   firstName String?
@@ -26,41 +26,40 @@ model User {
   isVerified Boolean @default(false)
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
-  
 
   currentHashedRefreshToken String?
-  currentVerifyToken String?
+  currentVerifyToken        String?
 
   // Relations
   datasets Dataset[]
-  charts    Chart[]
-
+  charts   Chart[]
 }
 
 model Dataset {
-  id          String       @id @default(cuid())
-  name        String       @unique
+  id          String      @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  name        String      @unique
   description String?
-  rowCount    Int          // Number of rows
-  columnCount Int          // Number of columns
-  createdAt   DateTime     @default(now())
-  updatedAt   DateTime     @updatedAt
+  rowCount    Int
+  columnCount Int
+  createdAt   DateTime    @default(now())
+  updatedAt   DateTime    @updatedAt
 
   // Relations
-  userId      String
-  user        User         @relation(fields: [userId], references: [id], onDelete: Cascade)
-  headers     DataHeader[] // One-to-many: each column is a DataHeader
+  userId String @db.Uuid
+  user   User   @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  headers DataHeader[]
   charts  Chart[]
 }
 
 model DataHeader {
-  id        String   @id @default(cuid())
-  datasetId String
+  id        String   @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  datasetId String   @db.Uuid
   dataset   Dataset  @relation(fields: [datasetId], references: [id], onDelete: Cascade)
 
-  name      String   // Column name
-  type      String   // Column type: number/string/date
-  index     Int      // Current position in dataset
+  name      String
+  type      String
+  index     Int
 
   // Encryption fields
   encryptedData    String
@@ -70,18 +69,18 @@ model DataHeader {
 }
 
 model Chart {
-  id        String   @id @default(cuid())
+  id        String   @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
   name      String
   description String?
-  type      String   // "bar", "line", "pie", etc.
-  config    Json     // column mapping, colors, etc.
+  type      String
+  config    Json
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
 
   // Relations
-  datasetId String
+  datasetId String @db.Uuid
   dataset   Dataset  @relation(fields: [datasetId], references: [id], onDelete: Cascade)
 
-  userId    String
-  user      User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  userId String @db.Uuid
+  user   User   @relation(fields: [userId], references: [id], onDelete: Cascade)
 }
