@@ -51,7 +51,6 @@ model Dataset {
   user        User         @relation(fields: [userId], references: [id], onDelete: Cascade)
   headers     DataHeader[] // One-to-many: each column is a DataHeader
   charts  Chart[]
-
 }
 
 model DataHeader {
