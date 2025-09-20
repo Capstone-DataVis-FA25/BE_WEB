@@ -126,33 +126,9 @@ export class DatasetsService {
                 throw new ForbiddenException('You do not have access to this dataset');
             }
 
-            // Decrypt headers
-            const decryptedDataset = {
-                ...dataset,
-                headers: await Promise.all(
-                    dataset.headers.map(async (header) => {
-                        const decryptedDataString = await this.kmsService.decryptData(
-                            header.encryptedData,
-                            header.encryptedDataKey,
-                            header.iv,
-                            header.authTag
-                        );
-
-                        const decryptedData = JSON.parse(decryptedDataString);
-
-                        return {
-                            id: header.id,
-                            datasetId: header.datasetId,
-                            name: header.name,
-                            type: header.type,
-                            index: header.index,
-                            data: decryptedData,
-                        };
-                    })
-                )
-            };
-
-            return decryptedDataset;
+            // Headers are automatically decrypted by the Prisma extension
+            // The 'data' field is now available on each header
+            return dataset;
         } catch (error) {
             if (error instanceof NotFoundException || error instanceof ForbiddenException) {
                 throw error;
