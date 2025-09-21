@@ -227,7 +227,7 @@ export class DatasetsService {
     }
 
     // Helper method to validate dataset ownership
-    private async validateOwnership(datasetId: string, userId: string) {
+    public async validateOwnership(datasetId: string, userId: string) {
         const dataset = await this.prismaService.prisma.dataset.findUnique({
             where: { id: datasetId },
         });

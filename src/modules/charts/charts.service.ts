@@ -2,10 +2,11 @@ import { Injectable, NotFoundException, ForbiddenException, BadRequestException 
 import { PrismaService } from '../../prisma/prisma.service';
 import { CreateChartDto } from './dto/create-chart.dto';
 import { UpdateChartDto } from './dto/update-chart.dto';
+import { DatasetsService } from '@modules/datasets/datasets.service';
 
 @Injectable()
 export class ChartsService {
-    constructor(private readonly prismaService: PrismaService) { }
+    constructor(private readonly prismaService: PrismaService, private readonly datasetService: DatasetsService) { }
 
     async findAll(userId: string) {
         try {
@@ -35,17 +36,7 @@ export class ChartsService {
     async findByDataset(datasetId: string, userId: string) {
         try {
             // First, verify that the dataset belongs to the user
-            const dataset = await this.prismaService.prisma.dataset.findUnique({
-                where: { id: datasetId },
-            });
-
-            if (!dataset) {
-                throw new NotFoundException('Dataset not found');
-            }
-
-            if (dataset.userId !== userId) {
-                throw new ForbiddenException('You do not have access to this dataset');
-            }
+            await this.datasetService.validateOwnership(datasetId, userId);
 
             const charts = await this.prismaService.prisma.chart.findMany({
                 where: {
