@@ -8,6 +8,7 @@ import {
 } from "@nestjs/common";
 import { PrismaService } from "../../prisma/prisma.service";
 import { CreateChartDto } from "./dto/create-chart.dto";
+import { parseChartSpecificConfig } from "./helpers/chart-config.helper";
 
 @Injectable()
 export class ChartService {
@@ -119,17 +120,93 @@ export class ChartService {
       config.yAxisLabel ??
       (derivedYAxisLabels.length > 0 ? derivedYAxisLabels.join(", ") : "Y");
 
-    // Build sanitized config for storage: include resolved IDs and presentation fields only
+    // Get chart-specific configuration based on chart type
+    const chartSpecificConfig = parseChartSpecificConfig(type, config);
+
+    // Build sanitized config for storage: include resolved IDs and ALL configuration settings
     const sanitizedConfig = {
+      // Basic chart info
       title: config.title,
       width: config.width,
       height: config.height,
       margin: config.margin,
+
+      // Resolved axis IDs
       xAxisKey: resolvedXId,
       yAxisKeys: resolvedYIds,
       xAxisLabel: derivedXAxisLabel,
       yAxisLabel: derivedYAxisLabel,
       yAxisLabels: derivedYAxisLabels,
+
+      // Animation settings
+      animationDuration: config.animationDuration ?? 1000,
+
+      // Display settings (with chart-type specific overrides)
+      showLegend: config.showLegend ?? true,
+      showGrid: config.showGrid ?? true,
+      showPoints: chartSpecificConfig.showPoints ?? config.showPoints ?? false,
+      showValues: chartSpecificConfig.showValues ?? config.showValues ?? false,
+      showTooltip: config.showTooltip ?? true,
+      enableZoom: config.enableZoom ?? false,
+      enablePan: config.enablePan ?? false,
+
+      // Chart-type specific settings (only include relevant ones for this chart type)
+      ...chartSpecificConfig,
+
+      // Axis formatting
+      xAxisRotation: config.xAxisRotation ?? 0,
+      yAxisRotation: config.yAxisRotation ?? 0,
+      xAxisFormatterType: config.xAxisFormatterType ?? "auto",
+      yAxisFormatterType: config.yAxisFormatterType ?? "number",
+
+      // Colors
+      backgroundColor: config.backgroundColor ?? "#ffffff",
+      gridColor: config.gridColor ?? "#e0e0e0",
+      textColor: config.textColor ?? "#333333",
+      colorPalette: config.colorPalette ?? [
+        "#3b82f6",
+        "#ef4444",
+        "#10b981",
+        "#f59e0b",
+        "#8b5cf6",
+        "#f97316",
+      ],
+
+      // Zoom & pan
+      zoomLevel: config.zoomLevel ?? 1,
+
+      // Text & Font settings
+      titleFontSize: config.titleFontSize ?? 18,
+      titleFontFamily: config.titleFontFamily ?? "Arial, sans-serif",
+      axisLabelFontSize: config.axisLabelFontSize ?? 12,
+      axisLabelFontFamily: config.axisLabelFontFamily ?? "Arial, sans-serif",
+      legendFontSize: config.legendFontSize ?? 12,
+      legendFontFamily: config.legendFontFamily ?? "Arial, sans-serif",
+
+      // Legend positioning
+      legendPosition: config.legendPosition ?? "right",
+      legendAlignment: config.legendAlignment ?? "center",
+      legendSize: config.legendSize ?? 150,
+
+      // Border & Visual effects
+      borderWidth: config.borderWidth ?? 0,
+      borderColor: config.borderColor ?? "#cccccc",
+      shadowEffect: config.shadowEffect ?? false,
+
+      // Axis range & scale settings
+      xAxisMin: config.xAxisMin ?? null,
+      xAxisMax: config.xAxisMax ?? null,
+      yAxisMin: config.yAxisMin ?? null,
+      yAxisMax: config.yAxisMax ?? null,
+      xAxisTickInterval: config.xAxisTickInterval ?? null,
+      yAxisTickInterval: config.yAxisTickInterval ?? null,
+      xAxisScale: config.xAxisScale ?? "linear",
+      yAxisScale: config.yAxisScale ?? "linear",
+
+      // Padding & Spacing
+      titlePadding: config.titlePadding ?? 20,
+      legendPadding: config.legendPadding ?? 15,
+      axisPadding: config.axisPadding ?? 10,
     };
 
     // Database operation with error handling
