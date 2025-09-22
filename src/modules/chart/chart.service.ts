@@ -8,7 +8,7 @@ import {
 } from "@nestjs/common";
 import { PrismaService } from "../../prisma/prisma.service";
 import { CreateChartDto } from "./dto/create-chart.dto";
-import { parseChartSpecificConfig } from "./helpers/chart-config.helper";
+import { parseChartSpecificConfig } from "@modules/charts/helpers/chart-config.helper";
 
 @Injectable()
 export class ChartService {
