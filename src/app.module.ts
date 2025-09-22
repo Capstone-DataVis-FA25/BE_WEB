@@ -13,6 +13,7 @@ import { UsersModule } from "@modules/users/users.module";
 import { PrismaModule } from "./prisma/prisma.module";
 import { EmailModule } from "@modules/email/email.module";
 import { DatasetsModule } from "@modules/datasets/datasets.module";
+import { KmsModule } from "@modules/kms/kms.module";
 
 @Module({
   imports: [
@@ -40,6 +41,7 @@ import { DatasetsModule } from "@modules/datasets/datasets.module";
     UsersModule,
     EmailModule,
     DatasetsModule,
+    KmsModule,
   ],
   controllers: [AppController],
   providers: [
