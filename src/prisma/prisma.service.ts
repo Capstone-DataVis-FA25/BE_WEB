@@ -24,6 +24,9 @@ function createExtendedPrisma() {
 					// Execute the original query first
 					const result = await query(args);
 
+					// Only decrypt if result contains data (optimization)
+					if (!result) return result;
+
 					// Function to recursively decrypt DataHeader objects
 					const decryptDataHeaders = async (obj: any) => {
 						if (!obj || typeof obj !== 'object') return;
@@ -38,25 +41,43 @@ function createExtendedPrisma() {
 
 						// If this object has DataHeader properties, decrypt it
 						if (obj.encryptedData && obj.encryptedDataKey && obj.iv && obj.authTag) {
-							try {
-								const decryptedDataString = await kmsService.decryptData(
-									obj.encryptedData,
-									obj.encryptedDataKey,
-									obj.iv,
-									obj.authTag
-								);
-								obj.data = JSON.parse(decryptedDataString);
+							// Validate that all required fields are strings
+							if (typeof obj.encryptedData === 'string' &&
+								typeof obj.encryptedDataKey === 'string' &&
+								typeof obj.iv === 'string' &&
+								typeof obj.authTag === 'string') {
+								try {
+									const decryptedDataString = await kmsService.decryptData(
+										obj.encryptedData,
+										obj.encryptedDataKey,
+										obj.iv,
+										obj.authTag
+									);
+									obj.data = JSON.parse(decryptedDataString);
 
-								// Remove the encrypted fields from the response for security
-								delete obj.encryptedData;
-								delete obj.encryptedDataKey;
-								delete obj.iv;
-								delete obj.authTag;
-							} catch (error) {
-								console.error('Failed to decrypt data:', error);
+									// Remove the encrypted fields from the response for security
+									delete obj.encryptedData;
+									delete obj.encryptedDataKey;
+									delete obj.iv;
+									delete obj.authTag;
+								} catch (error) {
+									console.error('Failed to decrypt data for object:', {
+										model,
+										operation,
+										errorMessage: error.message,
+										objectId: obj.id || 'unknown'
+									});
+									obj.data = [];
+
+									// Even on error, remove the encrypted fields for security
+									delete obj.encryptedData;
+									delete obj.encryptedDataKey;
+									delete obj.iv;
+									delete obj.authTag;
+								}
+							} else {
+								// Invalid field types, set empty data and remove fields
 								obj.data = [];
-
-								// Even on error, remove the encrypted fields for security
 								delete obj.encryptedData;
 								delete obj.encryptedDataKey;
 								delete obj.iv;
@@ -88,7 +109,7 @@ export type ExtendedPrismaClient = typeof extendedPrisma;
 
 @Injectable()
 export class PrismaService implements OnModuleInit, OnModuleDestroy {
-	// the actual client instance you’ll use
+	// the actual client instance you'll use
 	readonly prisma: ExtendedPrismaClient = extendedPrisma;
 
 	async onModuleInit() {
