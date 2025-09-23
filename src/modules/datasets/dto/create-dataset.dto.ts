@@ -33,6 +33,7 @@ export class CreateDataHeaderDto {
         example: [25, 30, 28, 35]
     })
     @IsArray()
+    @ArrayMinSize(1, { message: 'Each column must have at least one data value' })
     data: any[];
 }
 
