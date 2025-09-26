@@ -8,6 +8,7 @@ import {
   Delete,
   UseGuards,
   Request,
+  UsePipes,
 } from "@nestjs/common";
 import {
   ApiTags,
@@ -22,6 +23,8 @@ import { CreateChartDto } from "./dto/create-chart.dto";
 import { UpdateChartDto } from "./dto/update-chart.dto";
 import { JwtAccessTokenGuard } from "@modules/auth/guards/jwt-access-token.guard";
 import { AuthRequest } from "@modules/auth/auth.controller";
+import { PayloadSizeLimitPipe } from '../../pipes/payload-size-limit.pipe';
+import { AppConstants } from '../../constant/app.constants';
 
 @ApiTags("charts")
 @Controller("charts")
@@ -43,6 +46,7 @@ export class ChartsController {
   })
   @ApiResponse({ status: 404, description: "Dataset not found" })
   @ApiBody({ type: CreateChartDto })
+  @UsePipes(new PayloadSizeLimitPipe(AppConstants.CHART_PAYLOAD_MAX_SIZE))
   create(@Body() createChartDto: CreateChartDto, @Request() req: AuthRequest) {
     return this.chartsService.create(createChartDto, req.user.userId);
   }
@@ -115,6 +119,7 @@ export class ChartsController {
   @ApiResponse({ status: 404, description: "Chart not found" })
   @ApiParam({ name: "id", description: "ID of the chart to update" })
   @ApiBody({ type: UpdateChartDto })
+  @UsePipes(new PayloadSizeLimitPipe(AppConstants.CHART_PAYLOAD_MAX_SIZE))
   update(
     @Param("id") id: string,
     @Body() updateChartDto: UpdateChartDto,
