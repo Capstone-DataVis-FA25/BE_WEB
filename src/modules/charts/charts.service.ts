@@ -136,6 +136,11 @@ export class ChartsService {
   async create(createChartDto: CreateChartDto, userId: string) {
     const { name, description, type, config, datasetId } = createChartDto;
 
+    // Extract nested config structure
+    const chartConfig = config.config;
+    const formatters = config.formatters;
+    const seriesConfigs = config.seriesConfigs || [];
+
     // Verify that the dataset exists and belongs to the user
     const dataset = await this.prismaService.prisma.dataset.findUnique({
       where: { id: datasetId },
@@ -161,13 +166,13 @@ export class ChartsService {
     }
 
     // Resolve X header ID: prefer xAxisKey, then index, then name; if none, auto-detect
-    let resolvedXId: string | undefined = config?.xAxisKey;
-    if (!resolvedXId && typeof config?.xAxisIndex === "number") {
-      const byIndex = headers.find((h) => h.index === config.xAxisIndex);
+    let resolvedXId: string | undefined = chartConfig?.xAxisKey;
+    if (!resolvedXId && typeof chartConfig?.xAxisIndex === "number") {
+      const byIndex = headers.find((h) => h.index === chartConfig.xAxisIndex);
       resolvedXId = byIndex?.id;
     }
-    if (!resolvedXId && config?.xAxisName) {
-      const byName = headers.find((h) => h.name === config.xAxisName);
+    if (!resolvedXId && chartConfig?.xAxisName) {
+      const byName = headers.find((h) => h.name === chartConfig.xAxisName);
       resolvedXId = byName?.id;
     }
     if (!resolvedXId) {
@@ -180,16 +185,16 @@ export class ChartsService {
 
     // Resolve Y header IDs: prefer yAxisKeys, then indices, then names; if none, auto-detect
     let resolvedYIds: string[] | undefined =
-      Array.isArray(config?.yAxisKeys) && config.yAxisKeys.length > 0
-        ? config.yAxisKeys
+      Array.isArray(chartConfig?.yAxisKeys) && chartConfig.yAxisKeys.length > 0
+        ? chartConfig.yAxisKeys
         : undefined;
-    if (!resolvedYIds && Array.isArray(config?.yAxisIndices)) {
-      resolvedYIds = config.yAxisIndices
+    if (!resolvedYIds && Array.isArray(chartConfig?.yAxisIndices)) {
+      resolvedYIds = chartConfig.yAxisIndices
         .map((idx) => headers.find((h) => h.index === idx)?.id)
         .filter((id): id is string => Boolean(id));
     }
-    if (!resolvedYIds && Array.isArray(config?.yAxisNames)) {
-      resolvedYIds = config.yAxisNames
+    if (!resolvedYIds && Array.isArray(chartConfig?.yAxisNames)) {
+      resolvedYIds = chartConfig.yAxisNames
         .map((nm) => headers.find((h) => h.name === nm)?.id)
         .filter((id): id is string => Boolean(id));
     }
@@ -229,105 +234,33 @@ export class ChartsService {
     // Derive axis labels from headers when not provided
     const xHeaderMeta = headers.find((h) => h.id === resolvedXId);
     const yHeaderMetas = headers.filter((h) => resolvedYIds.includes(h.id));
-    const derivedXAxisLabel = config.xAxisLabel ?? xHeaderMeta?.name ?? "X";
+    const derivedXAxisLabel =
+      chartConfig.xAxisLabel ?? xHeaderMeta?.name ?? "X";
     const derivedYAxisLabels =
-      Array.isArray((config as any)["yAxisLabels"]) &&
-      (config as any)["yAxisLabels"].length > 0
-        ? (config as any)["yAxisLabels"]
+      Array.isArray((chartConfig as any)["yAxisLabels"]) &&
+      (chartConfig as any)["yAxisLabels"].length > 0
+        ? (chartConfig as any)["yAxisLabels"]
         : yHeaderMetas.map((h) => h.name || "").filter(Boolean);
     const derivedYAxisLabel =
-      config.yAxisLabel ??
+      chartConfig.yAxisLabel ??
       (derivedYAxisLabels.length > 0 ? derivedYAxisLabels.join(", ") : "Y");
 
-    // Get chart-specific configuration based on chart type
-    const chartSpecificConfig = parseChartSpecificConfig(type, config);
-
-    // Build sanitized config for storage: include resolved IDs and ALL configuration settings
+    // Build sanitized config for storage: preserve full nested structure from frontend
     const sanitizedConfig = {
-      // Basic chart info
-      title: config.title,
-      width: config.width,
-      height: config.height,
-      margin: config.margin,
-
-      // Resolved axis IDs
-      xAxisKey: resolvedXId,
-      yAxisKeys: resolvedYIds,
-      xAxisLabel: derivedXAxisLabel,
-      yAxisLabel: derivedYAxisLabel,
-      yAxisLabels: derivedYAxisLabels,
-
-      // Animation settings
-      animationDuration: config.animationDuration ?? 1000,
-
-      // Display settings (with chart-type specific overrides)
-      showLegend: config.showLegend ?? true,
-      showGrid: config.showGrid ?? true,
-      showPoints:
-        (chartSpecificConfig as any).showPoints ?? config.showPoints ?? false,
-      showValues:
-        (chartSpecificConfig as any).showValues ?? config.showValues ?? false,
-      showTooltip: config.showTooltip ?? true,
-      enableZoom: config.enableZoom ?? false,
-      enablePan: config.enablePan ?? false,
-
-      // Chart-type specific settings (only include relevant ones for this chart type)
-      ...chartSpecificConfig,
-
-      // Axis formatting
-      xAxisRotation: config.xAxisRotation ?? 0,
-      yAxisRotation: config.yAxisRotation ?? 0,
-      xAxisFormatterType: config.xAxisFormatterType ?? "auto",
-      yAxisFormatterType: config.yAxisFormatterType ?? "number",
-
-      // Colors
-      backgroundColor: config.backgroundColor ?? "#ffffff",
-      gridColor: config.gridColor ?? "#e0e0e0",
-      textColor: config.textColor ?? "#333333",
-      colorPalette: config.colorPalette ?? [
-        "#3b82f6",
-        "#ef4444",
-        "#10b981",
-        "#f59e0b",
-        "#8b5cf6",
-        "#f97316",
-      ],
-
-      // Zoom & pan
-      zoomLevel: config.zoomLevel ?? 1,
-
-      // Text & Font settings
-      titleFontSize: config.titleFontSize ?? 18,
-      titleFontFamily: config.titleFontFamily ?? "Arial, sans-serif",
-      axisLabelFontSize: config.axisLabelFontSize ?? 12,
-      axisLabelFontFamily: config.axisLabelFontFamily ?? "Arial, sans-serif",
-      legendFontSize: config.legendFontSize ?? 12,
-      legendFontFamily: config.legendFontFamily ?? "Arial, sans-serif",
-
-      // Legend positioning
-      legendPosition: config.legendPosition ?? "right",
-      legendAlignment: config.legendAlignment ?? "center",
-      legendSize: config.legendSize ?? 150,
-
-      // Border & Visual effects
-      borderWidth: config.borderWidth ?? 0,
-      borderColor: config.borderColor ?? "#cccccc",
-      shadowEffect: config.shadowEffect ?? false,
-
-      // Axis range & scale settings
-      xAxisMin: config.xAxisMin ?? null,
-      xAxisMax: config.xAxisMax ?? null,
-      yAxisMin: config.yAxisMin ?? null,
-      yAxisMax: config.yAxisMax ?? null,
-      xAxisTickInterval: config.xAxisTickInterval ?? null,
-      yAxisTickInterval: config.yAxisTickInterval ?? null,
-      xAxisScale: config.xAxisScale ?? "linear",
-      yAxisScale: config.yAxisScale ?? "linear",
-
-      // Padding & Spacing
-      titlePadding: config.titlePadding ?? 20,
-      legendPadding: config.legendPadding ?? 15,
-      axisPadding: config.axisPadding ?? 10,
+      // Main chart config with resolved axis IDs
+      config: {
+        ...chartConfig,
+        // Override with resolved axis IDs
+        xAxisKey: resolvedXId,
+        yAxisKeys: resolvedYIds,
+        xAxisLabel: derivedXAxisLabel,
+        yAxisLabel: derivedYAxisLabel,
+        yAxisLabels: derivedYAxisLabels,
+      },
+      // Preserve formatters from frontend
+      formatters: formatters,
+      // Preserve seriesConfigs from frontend
+      seriesConfigs: seriesConfigs,
     } as any;
 
     // Database operation with error handling
@@ -380,6 +313,8 @@ export class ChartsService {
           );
         }
       }
+
+      // Frontend sends complete config, no need for backend defaults
 
       const updatedChart = await this.prismaService.prisma.chart.update({
         where: { id },
@@ -479,13 +414,13 @@ export class ChartsService {
       const enhancedConfig = { ...config };
 
       // Replace xAxisKey UUID with header name
-      if (config.config.xAxisKey && headerMap.has(config.config.xAxisKey)) {
-        console.log("xAxisKey", config.xAxisKey);
+      if (config.config?.xAxisKey && headerMap.has(config.config.xAxisKey)) {
+        console.log("xAxisKey", config.config.xAxisKey);
         enhancedConfig.config.xAxisKey = headerMap.get(config.config.xAxisKey);
       }
 
       // Replace yAxisKeys UUIDs with header names
-      if (config.config.yAxisKeys && Array.isArray(config.config.yAxisKeys)) {
+      if (config.config?.yAxisKeys && Array.isArray(config.config.yAxisKeys)) {
         enhancedConfig.config.yAxisKeys = config.config.yAxisKeys.map((key) =>
           headerMap.has(key) ? headerMap.get(key) : key
         );
@@ -498,8 +433,8 @@ export class ChartsService {
         ...chart,
         config: enhancedConfig,
         originalAxisIds: {
-          xAxisKey: config.xAxisKey,
-          yAxisKeys: config.yAxisKeys,
+          xAxisKey: config.config?.xAxisKey,
+          yAxisKeys: config.config?.yAxisKeys,
         },
       };
     } catch (error) {

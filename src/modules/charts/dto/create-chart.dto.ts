@@ -7,7 +7,6 @@ import {
   IsIn,
   IsNumber,
   IsArray,
-  ArrayNotEmpty,
   ValidateNested,
   IsBoolean,
   Min,
@@ -73,6 +72,18 @@ export class ChartConfigDto {
   @ValidateNested()
   @Type(() => MarginDto)
   margin: MarginDto;
+
+  // Theme setting
+  @ApiPropertyOptional({
+    description: "Chart theme (light or dark)",
+    example: "dark",
+    enum: ["light", "dark"],
+    default: "light",
+  })
+  @IsOptional()
+  @IsString()
+  @IsIn(["light", "dark"])
+  theme?: string;
 
   // Preferred storage: resolved DataHeader IDs (will be filled by service)
   @ApiPropertyOptional({
@@ -154,6 +165,16 @@ export class ChartConfigDto {
   @IsString({ each: true })
   yAxisLabels?: string[];
 
+  @ApiPropertyOptional({
+    description: "Array of disabled line indices for multi-line charts",
+    example: [],
+    default: [],
+  })
+  @IsOptional()
+  @IsArray()
+  @IsNumber({}, { each: true })
+  disabledLines?: number[];
+
   // ========================
   // ANIMATION SETTINGS
   // ========================
@@ -199,6 +220,15 @@ export class ChartConfigDto {
   showPoints?: boolean;
 
   @ApiPropertyOptional({
+    description: "Show point values on data points",
+    example: true,
+    default: false,
+  })
+  @IsOptional()
+  @IsBoolean()
+  showPointValues?: boolean;
+
+  @ApiPropertyOptional({
     description: "Show data values on chart",
     example: false,
     default: false,
@@ -233,6 +263,24 @@ export class ChartConfigDto {
   @IsOptional()
   @IsBoolean()
   enablePan?: boolean;
+
+  @ApiPropertyOptional({
+    description: "Show axis labels",
+    example: true,
+    default: true,
+  })
+  @IsOptional()
+  @IsBoolean()
+  showAxisLabels?: boolean;
+
+  @ApiPropertyOptional({
+    description: "Show axis tick marks",
+    example: true,
+    default: true,
+  })
+  @IsOptional()
+  @IsBoolean()
+  showAxisTicks?: boolean;
 
   // ========================
   // BAR CHART SPECIFIC
@@ -305,6 +353,36 @@ export class ChartConfigDto {
   @Min(1)
   @Max(10)
   strokeWidth?: number;
+
+  @ApiPropertyOptional({
+    description: "Line curve style (alias for curveType)",
+    example: "curveMonotoneX",
+  })
+  @IsOptional()
+  @IsString()
+  curve?: string;
+
+  @ApiPropertyOptional({
+    description: "Line width (alias for strokeWidth)",
+    example: 2,
+    default: 2,
+  })
+  @IsOptional()
+  @IsNumber()
+  @Min(1)
+  @Max(10)
+  lineWidth?: number;
+
+  @ApiPropertyOptional({
+    description: "Point radius for line charts",
+    example: 4,
+    default: 4,
+  })
+  @IsOptional()
+  @IsNumber()
+  @Min(1)
+  @Max(20)
+  pointRadius?: number;
 
   // ========================
   // AREA CHART SPECIFIC
@@ -657,6 +735,17 @@ export class ChartConfigDto {
   gridColor?: string;
 
   @ApiPropertyOptional({
+    description: "Grid opacity",
+    example: 0.3,
+    default: 0.3,
+  })
+  @IsOptional()
+  @IsNumber()
+  @Min(0)
+  @Max(1)
+  gridOpacity?: number;
+
+  @ApiPropertyOptional({
     description: "Text color",
     example: "#333333",
     default: "#333333",
@@ -688,6 +777,17 @@ export class ChartConfigDto {
   @Min(0.1)
   @Max(10)
   zoomLevel?: number;
+
+  @ApiPropertyOptional({
+    description: "Maximum zoom extent",
+    example: 8,
+    default: 8,
+  })
+  @IsOptional()
+  @IsNumber()
+  @Min(1)
+  @Max(20)
+  zoomExtent?: number;
 
   // ========================
   // TEXT & FONT SETTINGS
@@ -722,6 +822,17 @@ export class ChartConfigDto {
   @Min(8)
   @Max(24)
   axisLabelFontSize?: number;
+
+  @ApiPropertyOptional({
+    description: "Label font size (general labels)",
+    example: 12,
+    default: 12,
+  })
+  @IsOptional()
+  @IsNumber()
+  @Min(8)
+  @Max(24)
+  labelFontSize?: number;
 
   @ApiPropertyOptional({
     description: "Axis labels font family",
@@ -860,6 +971,24 @@ export class ChartConfigDto {
   yAxisMax?: number;
 
   @ApiPropertyOptional({
+    description: "X axis start value (auto or manual)",
+    example: "auto",
+    default: "auto",
+  })
+  @IsOptional()
+  @IsString()
+  xAxisStart?: string;
+
+  @ApiPropertyOptional({
+    description: "Y axis start value (auto or manual)",
+    example: "auto",
+    default: "auto",
+  })
+  @IsOptional()
+  @IsString()
+  yAxisStart?: string;
+
+  @ApiPropertyOptional({
     description: "X axis tick interval (auto if not set)",
     example: 10,
     default: null,
@@ -938,6 +1067,63 @@ export class ChartConfigDto {
   axisPadding?: number;
 }
 
+// Formatters DTO
+export class FormattersDto {
+  @ApiPropertyOptional({ description: "Use Y axis formatter", default: true })
+  @IsOptional()
+  @IsBoolean()
+  useYFormatter?: boolean;
+
+  @ApiPropertyOptional({ description: "Use X axis formatter", default: true })
+  @IsOptional()
+  @IsBoolean()
+  useXFormatter?: boolean;
+
+  @ApiPropertyOptional({
+    description: "Y axis formatter type",
+    default: "number",
+  })
+  @IsOptional()
+  @IsString()
+  yFormatterType?: string;
+
+  @ApiPropertyOptional({
+    description: "X axis formatter type",
+    default: "number",
+  })
+  @IsOptional()
+  @IsString()
+  xFormatterType?: string;
+
+  @ApiPropertyOptional({ description: "Custom Y axis formatter", default: "" })
+  @IsOptional()
+  @IsString()
+  customYFormatter?: string;
+
+  @ApiPropertyOptional({ description: "Custom X axis formatter", default: "" })
+  @IsOptional()
+  @IsString()
+  customXFormatter?: string;
+}
+
+// Nested config structure DTO
+export class NestedChartConfigDto {
+  @ApiProperty({ description: "Chart configuration", type: ChartConfigDto })
+  @ValidateNested()
+  @Type(() => ChartConfigDto)
+  config: ChartConfigDto;
+
+  @ApiProperty({ description: "Chart formatters", type: FormattersDto })
+  @ValidateNested()
+  @Type(() => FormattersDto)
+  formatters: FormattersDto;
+
+  @ApiPropertyOptional({ description: "Series configurations", default: [] })
+  @IsOptional()
+  @IsArray()
+  seriesConfigs?: any[];
+}
+
 export class CreateChartDto {
   @ApiProperty({
     description: "Name for the chart",
@@ -974,18 +1160,29 @@ export class CreateChartDto {
 
   @ApiProperty({
     description:
-      "Chart configuration. If you omit axis mapping, the service will auto-detect X/Y from the dataset headers.",
+      "Chart configuration with nested structure containing config, formatters and seriesConfigs.",
     example: {
-      title: "Sample Chart",
-      width: 700,
-      height: 300,
-      margin: { top: 20, left: 50, right: 30, bottom: 40 },
+      config: {
+        title: "Sample Chart",
+        width: 700,
+        height: 300,
+        margin: { top: 20, left: 50, right: 30, bottom: 40 },
+      },
+      formatters: {
+        useYFormatter: true,
+        useXFormatter: true,
+        yFormatterType: "number",
+        xFormatterType: "number",
+        customYFormatter: "",
+        customXFormatter: "",
+      },
+      seriesConfigs: [],
     },
     required: true,
   })
   @ValidateNested()
-  @Type(() => ChartConfigDto)
-  config: ChartConfigDto;
+  @Type(() => NestedChartConfigDto)
+  config: NestedChartConfigDto;
 
   @ApiProperty({
     description: "ID of the dataset this chart belongs to",
