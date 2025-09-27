@@ -42,6 +42,7 @@ import { ChartsModule } from "@modules/charts/charts.module";
     UsersModule,
     EmailModule,
     DatasetsModule,
+    ChartsModule,
     KmsModule,
     ChartsModule,
   ],
@@ -54,4 +55,4 @@ import { ChartsModule } from "@modules/charts/charts.module";
     },
   ],
 })
-export class AppModule { }
+export class AppModule {}
