@@ -22,13 +22,17 @@ async function bootstrap() {
 		new ValidationPipe({
 			whitelist: true,
 			transform: true,
-			exceptionFactory: (errors: ValidationError[]) =>
-				new BadRequestException({
-					message: 'Validation failed',
-					details: errors
-						.map((error) => Object.values(error.constraints))
-						.flat(),
-				}),
+			exceptionFactory: (errors: ValidationError[]) => {
+				console.log('🚨 Validation errors:', JSON.stringify(errors, null, 2));
+				const errorMessages = errors
+					.map((error) => error.constraints ? Object.values(error.constraints) : [])
+					.flat();
+				return new BadRequestException({
+					message: errorMessages.length > 0 ? errorMessages.join(', ') : 'Validation failed',
+					details: errorMessages,
+					rawErrors: errors
+				});
+			},
 		}),
 	);
 	const port = process.env.PORT || config_service.get('PORT') || 4000;

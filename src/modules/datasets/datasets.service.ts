@@ -7,7 +7,7 @@ import {
   BadRequestException,
 } from "@nestjs/common";
 import { PrismaService } from "../../prisma/prisma.service";
-import { CreateDatasetDto } from "./dto/create-dataset.dto";
+import { CreateDatasetDto, CreateDataHeaderDto } from "./dto/create-dataset.dto";
 import { UpdateDatasetDto } from "./dto/update-dataset.dto";
 import { Prisma } from "@prisma/client";
 import { KmsService } from "../kms/kms.service";
@@ -17,10 +17,25 @@ export class DatasetsService {
   constructor(
     private readonly prismaService: PrismaService,
     private readonly kmsService: KmsService
-  ) {}
+  ) { }
 
   async create(createDatasetDto: CreateDatasetDto, userId: string) {
-    const { headers, name, description } = createDatasetDto;
+    const { headers, name, description, thousandsSeparator, decimalSeparator, dateFormat } = createDatasetDto;
+
+    // Validate header names are unique
+    const headerNames = headers.map(h => h.name);
+    const duplicateNames = headerNames.filter((name, index) => headerNames.indexOf(name) !== index);
+    if (duplicateNames.length > 0) {
+      throw new BadRequestException(`Duplicate column names found: ${[...new Set(duplicateNames)].join(', ')}`);
+    }
+
+    // Validate data types in headers
+    console.log('🔍 Validating headers:', headers.map(h => ({ name: h.name, type: h.type, dataLength: h.data.length })));
+    const validation = this.validateHeaderDataTypes(headers);
+    console.log('🔍 Validation result:', validation);
+    if (!validation.isValid) {
+      throw new BadRequestException(`Data type validation failed: ${validation.errors.join(', ')}`);
+    }
 
     // Calculate rowCount and columnCount from headers
     const rowCount = headers.length > 0 ? headers[0].data.length : 0;
@@ -56,6 +71,9 @@ export class DatasetsService {
           description: description || null,
           rowCount,
           columnCount,
+          thousandsSeparator: thousandsSeparator || ",",
+          decimalSeparator: decimalSeparator || ".",
+          dateFormat: dateFormat || "YYYY-MM-DD",
           headers: {
             create: encryptedHeaders,
           },
@@ -95,6 +113,9 @@ export class DatasetsService {
           description: true,
           rowCount: true,
           columnCount: true,
+          thousandsSeparator: true,
+          decimalSeparator: true,
+          dateFormat: true,
           createdAt: true,
           updatedAt: true,
           userId: true,
@@ -161,13 +182,29 @@ export class DatasetsService {
       // First validate ownership
       await this.validateOwnership(id, userId);
 
-      const { headers, name, description } = updateDatasetDto;
+      const { headers, name, description, thousandsSeparator, decimalSeparator, dateFormat } = updateDatasetDto;
       const updateData: Prisma.DatasetUpdateInput = {};
 
       if (name !== undefined) updateData.name = name;
       if (description !== undefined) updateData.description = description;
+      if (thousandsSeparator !== undefined) updateData.thousandsSeparator = thousandsSeparator;
+      if (decimalSeparator !== undefined) updateData.decimalSeparator = decimalSeparator;
+      if (dateFormat !== undefined) updateData.dateFormat = dateFormat;
 
       if (headers !== undefined) {
+        // Validate header names are unique
+        const headerNames = headers.map(h => h.name);
+        const duplicateNames = headerNames.filter((name, index) => headerNames.indexOf(name) !== index);
+        if (duplicateNames.length > 0) {
+          throw new BadRequestException(`Duplicate column names found: ${[...new Set(duplicateNames)].join(', ')}`);
+        }
+
+        // Validate data types in headers
+        const validation = this.validateHeaderDataTypes(headers);
+        if (!validation.isValid) {
+          throw new BadRequestException(`Data type validation failed: ${validation.errors.join(', ')}`);
+        }
+
         // Calculate new rowCount and columnCount from headers
         const rowCount = headers.length > 0 ? headers[0].data.length : 0;
         const columnCount = headers.length;
@@ -274,5 +311,52 @@ export class DatasetsService {
     }
 
     return dataset;
+  }
+
+  // Helper method to validate data types in headers
+  private validateHeaderDataTypes(headers: CreateDataHeaderDto[]): { isValid: boolean; errors: string[] } {
+    const errors: string[] = [];
+
+    for (const header of headers) {
+      if (header.type === 'number') {
+        // Validate that all data values are valid numbers
+        for (let i = 0; i < header.data.length; i++) {
+          const value = header.data[i];
+          if (value !== null && value !== undefined) {
+            if (typeof value !== 'number' || isNaN(value)) {
+              errors.push(`Column "${header.name}" at row ${i + 1}: Expected number but got ${typeof value} (${value})`);
+            }
+          }
+        }
+      } else if (header.type === 'date') {
+        // Validate that all data values are valid ISO date strings
+        for (let i = 0; i < header.data.length; i++) {
+          const value = header.data[i];
+          if (value !== null && value !== undefined) {
+            if (typeof value !== 'string') {
+              errors.push(`Column "${header.name}" at row ${i + 1}: Expected string but got ${typeof value} (${value})`);
+            } else {
+              // Check if it's a valid ISO date string
+              const date = new Date(value);
+              if (isNaN(date.getTime())) {
+                errors.push(`Column "${header.name}" at row ${i + 1}: Invalid date format "${value}". Expected ISO format (YYYY-MM-DD)`);
+              } else {
+                // Check if the string matches ISO format (YYYY-MM-DD or YYYY-MM-DDTHH:mm:ss)
+                const isoDateRegex = /^\d{4}-\d{2}-\d{2}$/;
+                const isoDateTimeRegex = /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}/;
+                if (!isoDateRegex.test(value) && !isoDateTimeRegex.test(value)) {
+                  errors.push(`Column "${header.name}" at row ${i + 1}: Date "${value}" is not in ISO format (YYYY-MM-DD or YYYY-MM-DDTHH:mm:ss)`);
+                }
+              }
+            }
+          }
+        }
+      }
+    }
+
+    return {
+      isValid: errors.length === 0,
+      errors
+    };
   }
 }
