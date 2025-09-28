@@ -75,17 +75,17 @@ model DataHeader {
 }
 
 model Chart {
-  id        String   @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
-  name      String
+  id          String   @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  name        String
   description String?
-  type      String
-  config    Json
-  createdAt DateTime @default(now())
-  updatedAt DateTime @updatedAt
+  type        String
+  config      Json
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
 
   // Relations
-  datasetId String @db.Uuid
-  dataset   Dataset  @relation(fields: [datasetId], references: [id], onDelete: Cascade)
+  datasetId String?   @db.Uuid
+  dataset   Dataset?  @relation(fields: [datasetId], references: [id], onDelete: SetNull)
 
   userId String @db.Uuid
   user   User   @relation(fields: [userId], references: [id], onDelete: Cascade)
