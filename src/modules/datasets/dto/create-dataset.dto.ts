@@ -15,10 +15,10 @@ export class CreateDataHeaderDto {
     @ApiProperty({
         description: 'Column data type',
         example: 'number',
-        enum: ['number', 'string', 'date']
+        enum: ['number', 'text', 'date']
     })
     @IsString()
-    @IsIn(['number', 'string', 'date'])
+    @IsIn(['number', 'text', 'date'])
     type: string;
 
     @ApiProperty({
@@ -108,4 +108,31 @@ export class CreateDatasetDto {
     @IsString()
     @MaxLength(100, { message: 'Dataset description must be at most 100 characters long' })
     description?: string;
+
+    @ApiProperty({
+        description: 'Thousands separator for number formatting',
+        example: ',',
+        required: false,
+    })
+    @IsOptional()
+    @IsString()
+    thousandsSeparator?: string;
+
+    @ApiProperty({
+        description: 'Decimal separator for number formatting',
+        example: '.',
+        required: false,
+    })
+    @IsOptional()
+    @IsString()
+    decimalSeparator?: string;
+
+    @ApiProperty({
+        description: 'Date format for date parsing',
+        example: 'YYYY-MM-DD',
+        required: false,
+    })
+    @IsOptional()
+    @IsString()
+    dateFormat?: string;
 }

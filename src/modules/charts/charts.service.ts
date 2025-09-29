@@ -134,8 +134,7 @@ export class ChartsService {
   }
 
   async create(createChartDto: CreateChartDto, userId: string) {
-    const { name, description, type, config, datasetId } = createChartDto;
-
+ 
     // Extract nested config structure
     const chartConfig = config.config;
     const formatters = config.formatters;
