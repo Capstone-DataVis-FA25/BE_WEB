@@ -42,7 +42,6 @@ import { ChartsModule } from "@modules/charts/charts.module";
     UsersModule,
     EmailModule,
     DatasetsModule,
-    ChartsModule,
     KmsModule,
     ChartsModule,
   ],
