@@ -134,7 +134,8 @@ export class ChartsService {
   }
 
   async create(createChartDto: CreateChartDto, userId: string) {
- 
+    const { name, description, type, config, datasetId } = createChartDto;
+
     // Extract nested config structure
     const chartConfig = config.config;
     const formatters = config.formatters;
@@ -244,6 +245,40 @@ export class ChartsService {
       chartConfig.yAxisLabel ??
       (derivedYAxisLabels.length > 0 ? derivedYAxisLabels.join(", ") : "Y");
 
+    // Auto-generate seriesConfigs based on yAxisKeys if not provided or empty
+    let finalSeriesConfigs = seriesConfigs;
+    if (!finalSeriesConfigs || finalSeriesConfigs.length === 0) {
+      // Default color palette if not provided in chartConfig
+      const defaultColorPalette = [
+        "#3b82f6",
+        "#ef4444",
+        "#10b981",
+        "#f59e0b",
+        "#8b5cf6",
+        "#f97316",
+      ];
+
+      // Use colorPalette from chartConfig or fallback to default
+      const colorPalette =
+        chartConfig?.colorPalette && chartConfig.colorPalette.length > 0
+          ? chartConfig.colorPalette
+          : defaultColorPalette;
+
+      // Generate seriesConfigs for each yAxisKey
+      finalSeriesConfigs = resolvedYIds.map((yAxisId, index) => {
+        const headerMeta = headers.find((h) => h.id === yAxisId);
+        const colorIndex = index % colorPalette.length;
+
+        return {
+          id: `series-${Date.now()}-${index}`,
+          name: headerMeta?.name || `Series ${index + 1}`,
+          dataColumn: yAxisId,
+          color: colorPalette[colorIndex],
+          visible: true,
+        };
+      });
+    }
+
     // Build sanitized config for storage: preserve full nested structure from frontend
     const sanitizedConfig = {
       // Main chart config with resolved axis IDs
@@ -258,8 +293,8 @@ export class ChartsService {
       },
       // Preserve formatters from frontend
       formatters: formatters,
-      // Preserve seriesConfigs from frontend
-      seriesConfigs: seriesConfigs,
+      // Use auto-generated or provided seriesConfigs
+      seriesConfigs: finalSeriesConfigs,
     } as any;
 
     // Database operation with error handling
@@ -312,12 +347,85 @@ export class ChartsService {
           );
         }
       }
+      console.log("updateChartDto", updateChartDto);
+
+      // Sync seriesConfigs with yAxisKeys if config is being updated
+      let processedUpdateDto = { ...updateChartDto };
+
+      if (updateChartDto.config?.config?.yAxisKeys) {
+        const yAxisKeys = updateChartDto.config.config.yAxisKeys;
+        const currentSeriesConfigs = updateChartDto.config.seriesConfigs || [];
+
+        // Get dataset headers for this chart or updated dataset
+        const datasetId =
+          updateChartDto.datasetId ||
+          (await this.validateOwnership(id, userId)).datasetId;
+        const headers = await this.prismaService.prisma.dataHeader.findMany({
+          where: { datasetId },
+          orderBy: { index: "asc" },
+          select: { id: true, name: true, index: true, type: true },
+        });
+
+        // Default color palette
+        const defaultColorPalette = [
+          "#3b82f6",
+          "#ef4444",
+          "#10b981",
+          "#f59e0b",
+          "#8b5cf6",
+          "#f97316",
+        ];
+
+        // Use colorPalette from chartConfig or fallback to default
+        const colorPalette =
+          updateChartDto.config.config?.colorPalette &&
+          updateChartDto.config.config.colorPalette.length > 0
+            ? updateChartDto.config.config.colorPalette
+            : defaultColorPalette;
+
+        // Sync seriesConfigs with yAxisKeys
+        const syncedSeriesConfigs = yAxisKeys.map((yAxisId, index) => {
+          // Try to find existing series config for this dataColumn
+          const existingSeries = currentSeriesConfigs.find(
+            (series) => series.dataColumn === yAxisId
+          );
+
+          if (existingSeries) {
+            // Keep existing series but ensure correct color index
+            return {
+              ...existingSeries,
+              color:
+                existingSeries.color ||
+                colorPalette[index % colorPalette.length],
+            };
+          } else {
+            // Create new series for this yAxisKey
+            const headerMeta = headers.find((h) => h.id === yAxisId);
+            return {
+              id: `series-${Date.now()}-${index}`,
+              name: headerMeta?.name || `Series ${index + 1}`,
+              dataColumn: yAxisId,
+              color: colorPalette[index % colorPalette.length],
+              visible: true,
+            };
+          }
+        });
+
+        // Update the config with synced seriesConfigs
+        processedUpdateDto = {
+          ...updateChartDto,
+          config: {
+            ...updateChartDto.config,
+            seriesConfigs: syncedSeriesConfigs,
+          },
+        };
+      }
 
       // Frontend sends complete config, no need for backend defaults
 
       const updatedChart = await this.prismaService.prisma.chart.update({
         where: { id },
-        data: updateChartDto,
+        data: processedUpdateDto,
         include: {
           dataset: {
             include: {
