@@ -11,6 +11,7 @@ import { CreateChartDto } from "./dto/create-chart.dto";
 import { UpdateChartDto } from "./dto/update-chart.dto";
 import { DatasetsService } from "@modules/datasets/datasets.service";
 import { parseChartSpecificConfig } from "./helpers/chart-config.helper";
+import { Messages } from "src/constant/message-config";
 
 @Injectable()
 export class ChartsService {
@@ -347,7 +348,6 @@ export class ChartsService {
           );
         }
       }
-      console.log("updateChartDto", updateChartDto);
 
       // Sync seriesConfigs with yAxisKeys if config is being updated
       let processedUpdateDto = { ...updateChartDto };
@@ -357,9 +357,7 @@ export class ChartsService {
         const currentSeriesConfigs = updateChartDto.config.seriesConfigs || [];
 
         // Get dataset headers for this chart or updated dataset
-        const datasetId =
-          updateChartDto.datasetId ||
-          (await this.validateOwnership(id, userId)).datasetId;
+        const datasetId = updateChartDto.datasetId || (await this.validateOwnership(id, userId)).datasetId;
         const headers = await this.prismaService.prisma.dataHeader.findMany({
           where: { datasetId },
           orderBy: { index: "asc" },
@@ -420,9 +418,7 @@ export class ChartsService {
           },
         };
       }
-
       // Frontend sends complete config, no need for backend defaults
-
       const updatedChart = await this.prismaService.prisma.chart.update({
         where: { id },
         data: processedUpdateDto,
@@ -444,8 +440,7 @@ export class ChartsService {
           },
         },
       });
-
-      return updatedChart;
+      return {updatedChart, message: Messages.CHART_UPDATE_SUCCESS};
     } catch (error) {
       if (
         error instanceof NotFoundException ||
@@ -453,6 +448,7 @@ export class ChartsService {
       ) {
         throw error;
       }
+      console.log('Console.log Hello world: ', error);
       throw new BadRequestException(`Failed to update chart: ${error.message}`);
     }
   }

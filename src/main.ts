@@ -28,16 +28,11 @@ async function bootstrap() {
 			transform: true,
 			exceptionFactory: (errors: ValidationError[]) => {
 				console.log("🚨 Validation errors:", JSON.stringify(errors, null, 2));
-				const errorMessages = errors
-					.map((error) =>
-						error.constraints ? Object.values(error.constraints) : []
-					)
-					.flat();
+				const errorMessages = errors.map((error) =>
+					error.constraints ? Object.values(error.constraints) : []
+				).flat();
 				return new BadRequestException({
-					message:
-						errorMessages.length > 0
-							? errorMessages.join(", ")
-							: "Validation failed",
+					message: errorMessages.length > 0 ? errorMessages.join(", ") : "Validation failed",
 					details: errorMessages,
 					rawErrors: errors,
 				});
