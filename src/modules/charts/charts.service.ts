@@ -24,23 +24,11 @@ export class ChartsService {
       const charts = await this.prismaService.prisma.chart.findMany({
         where: { userId },
         include: {
-          dataset: {
-            include: {
-              headers: {
-                orderBy: { index: "asc" },
-              },
-            },
-          },
+          dataset: true,
         },
         orderBy: { createdAt: "desc" },
       });
-
-      // Enhance each chart with resolved axis names
-      const enhancedCharts = charts.map((chart) =>
-        this.enhanceChartWithAxisNames(chart)
-      );
-
-      return enhancedCharts;
+      return charts;
     } catch (error) {
       throw new BadRequestException(`Failed to fetch charts: ${error.message}`);
     }
