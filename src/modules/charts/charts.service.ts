@@ -335,7 +335,6 @@ export class ChartsService {
           );
         }
       }
-      console.log("updateChartDto", updateChartDto);
 
       // Sync seriesConfigs with yAxisKeys if config is being updated
       let processedUpdateDto = { ...updateChartDto };
@@ -494,23 +493,16 @@ export class ChartsService {
       const config = chart.config;
       const headers = chart.dataset.headers;
 
-      console.log("headers", headers);
-      console.log("original config", config);
-
       // Create a map of header ID to header name for quick lookup
       const headerMap = new Map<string, string>();
       headers.forEach((header) => {
         headerMap.set(header.id, header.name);
       });
-      // Print headerMap
-      console.log("headerMap", headerMap);
-
       // Create enhanced config with resolved names
       const enhancedConfig = { ...config };
 
       // Replace xAxisKey UUID with header name
       if (config.config?.xAxisKey && headerMap.has(config.config.xAxisKey)) {
-        console.log("xAxisKey", config.config.xAxisKey);
         enhancedConfig.config.xAxisKey = headerMap.get(config.config.xAxisKey);
       }
 
@@ -520,8 +512,6 @@ export class ChartsService {
           headerMap.has(key) ? headerMap.get(key) : key
         );
       }
-
-      console.log("enhanced config", enhancedConfig);
 
       // Return chart with enhanced config and additional metadata
       return {

@@ -33,6 +33,7 @@ model User {
   // Relations
   datasets Dataset[]
   charts   Chart[]
+  chartNotes ChartNote[]
 }
 
 model Dataset {
@@ -89,4 +90,27 @@ model Chart {
 
   userId String @db.Uuid
   user   User   @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  chartNotes ChartNote[]
+}
+
+model ChartNote {
+  id        String   @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  content   String
+  timestamp String?  // Optional timestamp field for compatibility
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+  deletedAt DateTime? // Soft delete support
+
+  // Relations
+  chartId  String @db.Uuid
+  chart    Chart  @relation(fields: [chartId], references: [id], onDelete: Cascade)
+
+  authorId String @db.Uuid
+  author   User   @relation(fields: [authorId], references: [id], onDelete: Cascade)
+
+  @@index([chartId])
+  @@index([authorId])
+  @@index([deletedAt])
+  @@map("chart_notes")
 }

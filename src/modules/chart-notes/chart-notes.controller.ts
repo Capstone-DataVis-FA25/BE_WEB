@@ -1,0 +1,145 @@
+import {
+  Controller,
+  Get,
+  Post,
+  Body,
+  Patch,
+  Param,
+  Delete,
+  UseGuards,
+  Request,
+  HttpStatus,
+  HttpCode,
+} from '@nestjs/common';
+import { ApiTags, ApiOperation, ApiResponse, ApiBearerAuth, ApiParam } from '@nestjs/swagger';
+import { ChartNotesService } from './chart-notes.service';
+import { CreateChartNoteDto, UpdateChartNoteDto } from './dto';
+import { ChartNoteEntity } from './entities/chart-note.entity';
+import { JwtAccessTokenGuard } from '../auth/guards/jwt-access-token.guard';
+
+@ApiTags('Chart Notes')
+@ApiBearerAuth()
+@Controller('chart-notes')
+@UseGuards(JwtAccessTokenGuard)
+export class ChartNotesController {
+  constructor(private readonly chartNotesService: ChartNotesService) {}
+
+  @Post()
+  @ApiOperation({ summary: 'Create a new chart note' })
+  @ApiResponse({
+    status: HttpStatus.CREATED,
+    description: 'Chart note created successfully',
+    type: ChartNoteEntity,
+  })
+  @ApiResponse({
+    status: HttpStatus.BAD_REQUEST,
+    description: 'Invalid input data',
+  })
+  @ApiResponse({
+    status: HttpStatus.NOT_FOUND,
+    description: 'Chart not found',
+  })
+  async create(@Body() createChartNoteDto: CreateChartNoteDto, @Request() req) {
+    const note = await this.chartNotesService.create(createChartNoteDto, req.user.userId);
+    return {
+      statusCode: HttpStatus.CREATED,
+      message: 'Chart note created successfully',
+      data: new ChartNoteEntity(note),
+    };
+  }
+
+  @Get('chart/:chartId')
+  @ApiOperation({ summary: 'Get all notes for a specific chart' })
+  @ApiParam({ name: 'chartId', description: 'Chart ID', type: String })
+  @ApiResponse({
+    status: HttpStatus.OK,
+    description: 'Chart notes retrieved successfully',
+    type: [ChartNoteEntity],
+  })
+  @ApiResponse({
+    status: HttpStatus.NOT_FOUND,
+    description: 'Chart not found',
+  })
+  async findAllByChart(@Param('chartId') chartId: string) {
+    const notes = await this.chartNotesService.findAllByChart(chartId);
+    return {
+      statusCode: HttpStatus.OK,
+      message: 'Chart notes retrieved successfully',
+      data: notes.map((note) => new ChartNoteEntity(note)),
+    };
+  }
+
+  @Get(':id')
+  @ApiOperation({ summary: 'Get a specific chart note by ID' })
+  @ApiParam({ name: 'id', description: 'Chart note ID', type: String })
+  @ApiResponse({
+    status: HttpStatus.OK,
+    description: 'Chart note retrieved successfully',
+    type: ChartNoteEntity,
+  })
+  @ApiResponse({
+    status: HttpStatus.NOT_FOUND,
+    description: 'Chart note not found',
+  })
+  async findOne(@Param('id') id: string) {
+    const note = await this.chartNotesService.findOne(id);
+    return {
+      statusCode: HttpStatus.OK,
+      message: 'Chart note retrieved successfully',
+      data: new ChartNoteEntity(note),
+    };
+  }
+
+  @Patch(':id')
+  @ApiOperation({ summary: 'Update a chart note' })
+  @ApiParam({ name: 'id', description: 'Chart note ID', type: String })
+  @ApiResponse({
+    status: HttpStatus.OK,
+    description: 'Chart note updated successfully',
+    type: ChartNoteEntity,
+  })
+  @ApiResponse({
+    status: HttpStatus.NOT_FOUND,
+    description: 'Chart note not found',
+  })
+  @ApiResponse({
+    status: HttpStatus.FORBIDDEN,
+    description: 'You can only update your own notes',
+  })
+  async update(
+    @Param('id') id: string,
+    @Body() updateChartNoteDto: UpdateChartNoteDto,
+    @Request() req,
+  ) {
+    const note = await this.chartNotesService.update(id, updateChartNoteDto, req.user.userId);
+    return {
+      statusCode: HttpStatus.OK,
+      message: 'Chart note updated successfully',
+      data: new ChartNoteEntity(note),
+    };
+  }
+
+  @Delete(':id')
+  @HttpCode(HttpStatus.OK)
+  @ApiOperation({ summary: 'Delete a chart note (soft delete)' })
+  @ApiParam({ name: 'id', description: 'Chart note ID', type: String })
+  @ApiResponse({
+    status: HttpStatus.OK,
+    description: 'Chart note deleted successfully',
+  })
+  @ApiResponse({
+    status: HttpStatus.NOT_FOUND,
+    description: 'Chart note not found',
+  })
+  @ApiResponse({
+    status: HttpStatus.FORBIDDEN,
+    description: 'You can only delete your own notes',
+  })
+  async remove(@Param('id') id: string, @Request() req) {
+    const result = await this.chartNotesService.remove(id, req.user.userId);
+    return {
+      statusCode: HttpStatus.OK,
+      ...result,
+    };
+  }
+}
