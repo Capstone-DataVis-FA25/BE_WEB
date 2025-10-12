@@ -11,6 +11,7 @@ import { CreateChartDto } from "./dto/create-chart.dto";
 import { UpdateChartDto } from "./dto/update-chart.dto";
 import { DatasetsService } from "@modules/datasets/datasets.service";
 import { parseChartSpecificConfig } from "./helpers/chart-config.helper";
+import { Messages } from "src/constant/message-config";
 
 @Injectable()
 export class ChartsService {
@@ -198,8 +199,7 @@ export class ChartsService {
           },
         },
       });
-
-      return updatedChart;
+      return {updatedChart, message: Messages.CHART_UPDATE_SUCCESS};
     } catch (error) {
       if (
         error instanceof NotFoundException ||
@@ -207,6 +207,7 @@ export class ChartsService {
       ) {
         throw error;
       }
+      console.log('Console.log Hello world: ', error);
       throw new BadRequestException(`Failed to update chart: ${error.message}`);
     }
   }
