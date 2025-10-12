@@ -16,17 +16,77 @@ enum UserRole {
 }
 
 model User {
-  id        String   @id @default(cuid())
+  id        String   @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
   email     String   @unique
-  password  String
+  password  String?
   firstName String?
   lastName  String?
   role      UserRole @default(USER)
   isActive  Boolean  @default(true)
+  isVerified Boolean @default(false)
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
 
   currentHashedRefreshToken String?
+  currentVerifyToken        String?
 
-  @@map("users")
+  // Relations
+  datasets Dataset[]
+  charts   Chart[]
+}
+
+model Dataset {
+  id          String      @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  name        String      @unique
+  description String?
+  rowCount    Int
+  columnCount Int
+  
+  // Format fields for data parsing
+  thousandsSeparator String? @default(",")
+  decimalSeparator   String? @default(".")
+  dateFormat        String? @default("YYYY-MM-DD")
+  
+  createdAt   DateTime    @default(now())
+  updatedAt   DateTime    @updatedAt
+
+  // Relations
+  userId String @db.Uuid
+  user   User   @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  headers DataHeader[]
+  charts  Chart[]
+}
+
+model DataHeader {
+  id        String   @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  datasetId String   @db.Uuid
+  dataset   Dataset  @relation(fields: [datasetId], references: [id], onDelete: Cascade)
+
+  name      String
+  type      String
+  index     Int
+
+  // Encryption fields
+  encryptedData    String
+  iv               String
+  authTag          String
+  encryptedDataKey String
+}
+
+model Chart {
+  id          String   @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  name        String
+  description String?
+  type        String
+  config      Json
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  // Relations
+  datasetId String?   @db.Uuid
+  dataset   Dataset?  @relation(fields: [datasetId], references: [id], onDelete: SetNull)
+
+  userId String @db.Uuid
+  user   User   @relation(fields: [userId], references: [id], onDelete: Cascade)
 }

@@ -9,6 +9,7 @@ CREATE TABLE "users" (
     "firstName" TEXT,
     "lastName" TEXT,
     "role" "UserRole" NOT NULL DEFAULT 'USER',
+    "isVerified" BOOLEAN NOT NULL DEFAULT false,
     "isActive" BOOLEAN NOT NULL DEFAULT true,
     "createdAt" TIMESTAMP(3) NOT NULL DEFAULT CURRENT_TIMESTAMP,
     "updatedAt" TIMESTAMP(3) NOT NULL,

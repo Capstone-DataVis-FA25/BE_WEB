@@ -1,14 +1,22 @@
 export type User = {
-	id: string;
-	email: string;
-	password: string;
-	firstName: string | null;
-	lastName: string | null;
-	role: 'USER' | 'ADMIN';
-	isActive: boolean;
-	createdAt: Date;
-	updatedAt: Date;
-	currentHashedRefreshToken: string | null;
+  id: string;
+  email: string;
+  password: string | null;
+  firstName: string | null;
+  lastName: string | null;
+  role: "USER" | "ADMIN";
+  isActive: boolean;
+  isVerified: boolean;
+  createdAt: Date;
+  updatedAt: Date;
+  currentVerifyToken: string | null;
+  currentHashedRefreshToken: string | null;
+  isSocialAccount: boolean;
 };
 
-export type UserWithoutPassword = Omit<User, 'password' | 'currentHashedRefreshToken'>;
+export type UserWithoutPassword = Omit<
+  User,
+  | "password"
+  | "currentHashedRefreshToken"
+  | "currentVerifyToken"
+>;

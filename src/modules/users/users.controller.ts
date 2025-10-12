@@ -7,17 +7,22 @@ import {
 	Param,
 	Delete,
 	UseGuards,
+	Request,
 } from '@nestjs/common';
-import { ApiTags, ApiOperation, ApiResponse, ApiBearerAuth } from '@nestjs/swagger';
+import { ApiTags, ApiOperation, ApiResponse, ApiBearerAuth, ApiBody } from '@nestjs/swagger';
 import { UsersService } from './users.service';
 import { CreateUserDto } from './dto/create-user.dto';
 import { UpdateUserDto } from './dto/update-user.dto';
+import { ChangePasswordDTO } from './dto/change-password.dto';
+import { JwtAccessTokenGuard } from '@modules/auth/guards/jwt-access-token.guard';
+import { AuthRequest } from '@modules/auth/auth.controller';
 
 
 @ApiTags('users')
 @Controller('users')
+@ApiBearerAuth()
 export class UsersController {
-	constructor(private readonly usersService: UsersService) {}
+	constructor(private readonly usersService: UsersService) { }
 
 	@Post()
 	@ApiOperation({ summary: 'Create a new user' })
@@ -33,11 +38,33 @@ export class UsersController {
 		return this.usersService.findAll();
 	}
 
+	@Get('me')
+	@UseGuards(JwtAccessTokenGuard)
+	viewProfile(@Request() req: AuthRequest) {
+		return this.usersService.findOne(req.user.userId);
+	}
+
 	@Get(':id')
 	@ApiOperation({ summary: 'Get user by ID' })
 	@ApiResponse({ status: 200, description: 'User found' })
 	findOne(@Param('id') id: string) {
 		return this.usersService.findOne(id);
+	}
+
+	//Change password API
+	@Patch('me/change-password')
+	@ApiOperation({ summary: 'Change user password' })
+	@UseGuards(JwtAccessTokenGuard)
+	changePassword(@Request() req: AuthRequest, @Body() changePasswordDto: ChangePasswordDTO) {
+		return this.usersService.changePassword(req.user.userId, changePasswordDto);
+	}
+
+	//Update Profile
+	@Patch('me/update-profile')
+	@ApiOperation({ summary: 'Update user profile' })
+	@UseGuards(JwtAccessTokenGuard)
+	updateProfile(@Request() req: AuthRequest, @Body() updateProfileDto: UpdateUserDto) {
+		return this.usersService.updateProfile(req.user.userId, updateProfileDto);
 	}
 
 	@Patch(':id')
@@ -50,7 +77,9 @@ export class UsersController {
 	@Delete(':id')
 	@ApiOperation({ summary: 'Delete user by ID' })
 	@ApiResponse({ status: 200, description: 'User deleted successfully' })
-	remove(@Param('id') id: string) {
-		return this.usersService.remove(id);
+	@UseGuards(JwtAccessTokenGuard)
+	@ApiBody({ schema: { properties: { email: { type: 'string' } } } })
+	remove(@Param('id') id: string, @Body('email') email: string) {
+		return this.usersService.remove(id, email);
 	}
 }
