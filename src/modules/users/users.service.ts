@@ -35,11 +35,11 @@ export class UsersService {
 
   async findAll(): Promise<UserWithoutPassword[]> {
     const users = await this.prismaService.prisma.user.findMany({
-            omit: {
+      omit: {
         password: true,
         currentHashedRefreshToken: true,
         currentVerifyToken: true,
-            }
+      }
     });
 
     return users as UserWithoutPassword[];
@@ -48,11 +48,11 @@ export class UsersService {
   async findOne(id: string): Promise<UserWithoutPassword | null> {
     const user = await this.prismaService.prisma.user.findUnique({
       where: { id },
-           omit: {
+      omit: {
         password: true,
         currentHashedRefreshToken: true,
         currentVerifyToken: true,
-            }
+      }
     });
     return user as UserWithoutPassword | null;
   }
@@ -224,5 +224,25 @@ export class UsersService {
     });
 
     return { user: updatedUser };
+  }
+
+  // Lock or unlock a user (admin functionality)
+  async lockUnlockUser(
+    userId: string,
+    isActive: boolean
+  ): Promise<UserWithoutPassword> {
+    const user = await this.prismaService.prisma.user.update({
+      where: { id: userId },
+      data: {
+        isActive: isActive,
+      },
+      omit: {
+        password: true,
+        currentHashedRefreshToken: true,
+        currentVerifyToken: true,
+      }
+    });
+
+    return user as UserWithoutPassword;
   }
 }
