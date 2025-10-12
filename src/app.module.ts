@@ -15,6 +15,7 @@ import { EmailModule } from "@modules/email/email.module";
 import { DatasetsModule } from "@modules/datasets/datasets.module";
 import { KmsModule } from "@modules/kms/kms.module";
 import { ChartsModule } from "@modules/charts/charts.module";
+import { AiCleanerModule } from "@modules/ai-cleaner/ai-cleaner.module";
 
 @Module({
   imports: [
@@ -27,6 +28,10 @@ import { ChartsModule } from "@modules/charts/charts.module";
         DATABASE_URL: Joi.string().required(),
         JWT_ACCESS_TOKEN_EXPIRATION_TIME: Joi.number().required(),
         JWT_REFRESH_TOKEN_EXPIRATION_TIME: Joi.number().required(),
+        // AI Cleaner (optional, service will throw if key missing when used)
+        OPENAI_API_KEY: Joi.string().optional(),
+        OPENAI_BASE_URL: Joi.string().uri().optional(),
+        OPENAI_MODEL: Joi.string().optional(),
       }),
       validationOptions: {
         abortEarly: false,
@@ -44,6 +49,7 @@ import { ChartsModule } from "@modules/charts/charts.module";
     DatasetsModule,
     KmsModule,
     ChartsModule,
+    AiCleanerModule,
   ],
   controllers: [AppController],
   providers: [
