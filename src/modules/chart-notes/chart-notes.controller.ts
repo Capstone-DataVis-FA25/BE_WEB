@@ -37,6 +37,10 @@ export class ChartNotesController {
     status: HttpStatus.NOT_FOUND,
     description: 'Chart not found',
   })
+  @ApiResponse({
+    status: HttpStatus.FORBIDDEN,
+    description: 'You can only create notes for your own charts',
+  })
   async create(@Body() createChartNoteDto: CreateChartNoteDto, @Request() req) {
     const note = await this.chartNotesService.create(createChartNoteDto, req.user.userId);
     return {
@@ -57,8 +61,12 @@ export class ChartNotesController {
     status: HttpStatus.NOT_FOUND,
     description: 'Chart not found',
   })
-  async findAllByChart(@Param('chartId') chartId: string) {
-    const notes = await this.chartNotesService.findAllByChart(chartId);
+  @ApiResponse({
+    status: HttpStatus.FORBIDDEN,
+    description: 'You can only view notes from your own charts',
+  })
+  async findAllByChart(@Param('chartId') chartId: string, @Request() req) {
+    const notes = await this.chartNotesService.findAllByChart(chartId, req.user.userId);
     return {
       statusCode: HttpStatus.OK,
       message: 'Chart notes retrieved successfully',
@@ -77,8 +85,12 @@ export class ChartNotesController {
     status: HttpStatus.NOT_FOUND,
     description: 'Chart note not found',
   })
-  async findOne(@Param('id') id: string) {
-    const note = await this.chartNotesService.findOne(id);
+  @ApiResponse({
+    status: HttpStatus.FORBIDDEN,
+    description: 'You can only view notes from your own charts or your own notes',
+  })
+  async findOne(@Param('id') id: string, @Request() req) {
+    const note = await this.chartNotesService.findOne(id, req.user.userId);
     return {
       statusCode: HttpStatus.OK,
       message: 'Chart note retrieved successfully',
@@ -116,7 +128,7 @@ export class ChartNotesController {
 
   @Delete(':id')
   @HttpCode(HttpStatus.OK)
-  @ApiOperation({ summary: 'Delete a chart note (soft delete)' })
+  @ApiOperation({ summary: 'Delete a chart note (hard delete)' })
   @ApiParam({ name: 'id', description: 'Chart note ID', type: String })
   @ApiResponse({
     status: HttpStatus.OK,
@@ -128,7 +140,7 @@ export class ChartNotesController {
   })
   @ApiResponse({
     status: HttpStatus.FORBIDDEN,
-    description: 'You can only delete your own notes',
+    description: 'You can only delete your own notes or notes from your charts',
   })
   async remove(@Param('id') id: string, @Request() req) {
     const result = await this.chartNotesService.remove(id, req.user.userId);

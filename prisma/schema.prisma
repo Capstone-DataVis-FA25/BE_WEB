@@ -9,7 +9,7 @@ datasource db {
 
 model Chart {
   id          String      @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
-  name        String
+  name        String      @unique
   description String?
   type        String
   config      Json
@@ -26,7 +26,6 @@ model ChartNote {
   id          String    @id(map: "chart_notes_pkey") @default(dbgenerated("gen_random_uuid()")) @db.Uuid
   content     String
   createdAt   DateTime  @default(now())
-  deletedAt   DateTime?
   chartId     String    @db.Uuid
   authorId    String    @db.Uuid
   isCompleted Boolean   @default(false)
@@ -35,7 +34,6 @@ model ChartNote {
 
   @@index([authorId], map: "chart_notes_authorId_idx")
   @@index([chartId], map: "chart_notes_chartId_idx")
-  @@index([deletedAt], map: "chart_notes_deletedAt_idx")
 }
 
 model DataHeader {

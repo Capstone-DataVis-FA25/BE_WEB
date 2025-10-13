@@ -14,8 +14,8 @@ export class ChartNotesService {
   /**
    * Get all notes for a specific chart
    */
-  async findAllByChart(chartId: string) {
-    // Check if chart exists
+  async findAllByChart(chartId: string, userId: string) {
+    // Check if chart exists and belongs to user
     const chart = await this.prisma.prisma.chart.findUnique({
       where: { id: chartId },
     });
@@ -24,10 +24,13 @@ export class ChartNotesService {
       throw new NotFoundException(`Chart with ID ${chartId} not found`);
     }
 
+    if (chart.userId !== userId) {
+      throw new ForbiddenException('You can only view notes from your own charts');
+    }
+
     return this.prisma.prisma.chartNote.findMany({
       where: {
         chartId,
-        deletedAt: null, // Only non-deleted notes
       },
       include: {
         author: {
@@ -48,11 +51,10 @@ export class ChartNotesService {
   /**
     * Get a specific note by ID
   */
-  async findOne(id: string) {
-    const note = await this.prisma.prisma.chartNote.findFirst({
+  async findOne(id: string, userId: string) {
+    const note = await this.prisma.prisma.chartNote.findUnique({
       where: {
         id,
-        deletedAt: null,
       },
       include: {
         author: {
@@ -63,11 +65,21 @@ export class ChartNotesService {
             lastName: true,
           },
         },
+        chart: {
+          select: {
+            userId: true,
+          },
+        },
       },
     });
 
     if (!note) {
       throw new NotFoundException(`Chart note with ID ${id} not found`);
+    }
+
+    // Check if user owns the chart or is the note author
+    if (note.chart.userId !== userId && note.authorId !== userId) {
+      throw new ForbiddenException('You can only view notes from your own charts or your own notes');
     }
 
     return note;
@@ -79,7 +91,6 @@ export class ChartNotesService {
   async create(createChartNoteDto: CreateChartNoteDto, userId: string) {
     const { chartId, content, isCompleted } = createChartNoteDto;
 
-    // Check if chart exists
     const chart = await this.prisma.prisma.chart.findUnique({
       where: { id: chartId },
     });
@@ -88,7 +99,10 @@ export class ChartNotesService {
       throw new NotFoundException(`Chart with ID ${chartId} not found`);
     }
 
-    // Create the note
+    if (chart.userId !== userId) {
+      throw new ForbiddenException('You can only create notes for your own charts');
+    }
+
     const note = await this.prisma.prisma.chartNote.create({
       data: {
         content,
@@ -115,9 +129,8 @@ export class ChartNotesService {
    * Update a chart note
    */
   async update(id: string, updateChartNoteDto: UpdateChartNoteDto, userId: string) {
-    const note = await this.findOne(id);
+    const note = await this.findOne(id, userId);
 
-    // Check if user is the author
     if (note.authorId !== userId) {
       throw new ForbiddenException('You can only update your own notes');
     }
@@ -150,23 +163,17 @@ export class ChartNotesService {
   }
 
   /**
-   * Delete a chart note (soft delete)
+   * Delete a chart note (hard delete)
    */
   async remove(id: string, userId: string) {
-    const note = await this.findOne(id);
+    const note = await this.findOne(id, userId);
 
-    // Check if user is the author or admin
-    if (note.authorId !== userId) {
-      // You can add admin check here if needed
-      throw new ForbiddenException('You can only delete your own notes');
+    if (note.authorId !== userId && note.chart.userId !== userId) {
+      throw new ForbiddenException('You can only delete your own notes or notes from your charts');
     }
 
-    // Soft delete
-    await this.prisma.prisma.chartNote.update({
+    await this.prisma.prisma.chartNote.delete({
       where: { id },
-      data: {
-        deletedAt: new Date(),
-      },
     });
 
     return { message: 'Note deleted successfully' };
@@ -176,9 +183,8 @@ export class ChartNotesService {
    * Toggle the completed status of a chart note
    */
   async toggleCompleted(id: string, userId: string) {
-    const note = await this.findOne(id);
+    const note = await this.findOne(id, userId);
 
-    // Check if user is the author
     if (note.authorId !== userId) {
       throw new ForbiddenException('You can only update your own notes');
     }
@@ -201,24 +207,5 @@ export class ChartNotesService {
     });
 
     return updatedNote;
-  }
-
-  /**
-   * Permanently delete a chart note (hard delete - admin only)
-   */
-  async removeForever(id: string) {
-    const note = await this.prisma.prisma.chartNote.findUnique({
-      where: { id },
-    });
-
-    if (!note) {
-      throw new NotFoundException(`Chart note with ID ${id} not found`);
-    }
-
-    await this.prisma.prisma.chartNote.delete({
-      where: { id },
-    });
-
-    return { message: 'Note permanently deleted' };
   }
 }
