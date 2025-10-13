@@ -15,6 +15,7 @@ import { EmailModule } from "@modules/email/email.module";
 import { DatasetsModule } from "@modules/datasets/datasets.module";
 import { KmsModule } from "@modules/kms/kms.module";
 import { ChartsModule } from "@modules/charts/charts.module";
+import { ChartNotesModule } from "@modules/chart-notes/chart-notes.module";
 
 @Module({
   imports: [
@@ -44,6 +45,7 @@ import { ChartsModule } from "@modules/charts/charts.module";
     DatasetsModule,
     KmsModule,
     ChartsModule,
+    ChartNotesModule,
   ],
   controllers: [AppController],
   providers: [
