@@ -14,7 +14,6 @@ import {
 import { ApiTags, ApiOperation, ApiResponse, ApiBearerAuth, ApiParam } from '@nestjs/swagger';
 import { ChartNotesService } from './chart-notes.service';
 import { CreateChartNoteDto, UpdateChartNoteDto } from './dto';
-import { ChartNoteEntity } from './entities/chart-note.entity';
 import { JwtAccessTokenGuard } from '../auth/guards/jwt-access-token.guard';
 
 @ApiTags('Chart Notes')
@@ -29,7 +28,6 @@ export class ChartNotesController {
   @ApiResponse({
     status: HttpStatus.CREATED,
     description: 'Chart note created successfully',
-    type: ChartNoteEntity,
   })
   @ApiResponse({
     status: HttpStatus.BAD_REQUEST,
@@ -44,7 +42,7 @@ export class ChartNotesController {
     return {
       statusCode: HttpStatus.CREATED,
       message: 'Chart note created successfully',
-      data: new ChartNoteEntity(note),
+      data: note,
     };
   }
 
@@ -54,7 +52,6 @@ export class ChartNotesController {
   @ApiResponse({
     status: HttpStatus.OK,
     description: 'Chart notes retrieved successfully',
-    type: [ChartNoteEntity],
   })
   @ApiResponse({
     status: HttpStatus.NOT_FOUND,
@@ -65,7 +62,7 @@ export class ChartNotesController {
     return {
       statusCode: HttpStatus.OK,
       message: 'Chart notes retrieved successfully',
-      data: notes.map((note) => new ChartNoteEntity(note)),
+      data: notes,
     };
   }
 
@@ -75,7 +72,6 @@ export class ChartNotesController {
   @ApiResponse({
     status: HttpStatus.OK,
     description: 'Chart note retrieved successfully',
-    type: ChartNoteEntity,
   })
   @ApiResponse({
     status: HttpStatus.NOT_FOUND,
@@ -86,7 +82,7 @@ export class ChartNotesController {
     return {
       statusCode: HttpStatus.OK,
       message: 'Chart note retrieved successfully',
-      data: new ChartNoteEntity(note),
+      data: note,
     };
   }
 
@@ -96,7 +92,6 @@ export class ChartNotesController {
   @ApiResponse({
     status: HttpStatus.OK,
     description: 'Chart note updated successfully',
-    type: ChartNoteEntity,
   })
   @ApiResponse({
     status: HttpStatus.NOT_FOUND,
@@ -115,7 +110,7 @@ export class ChartNotesController {
     return {
       statusCode: HttpStatus.OK,
       message: 'Chart note updated successfully',
-      data: new ChartNoteEntity(note),
+      data: note,
     };
   }
 
@@ -140,6 +135,30 @@ export class ChartNotesController {
     return {
       statusCode: HttpStatus.OK,
       ...result,
+    };
+  }
+
+  @Patch(':id/toggle-completed')
+  @ApiOperation({ summary: 'Toggle completed status of a chart note' })
+  @ApiParam({ name: 'id', description: 'Chart note ID', type: String })
+  @ApiResponse({
+    status: HttpStatus.OK,
+    description: 'Chart note status toggled successfully',
+  })
+  @ApiResponse({
+    status: HttpStatus.NOT_FOUND,
+    description: 'Chart note not found',
+  })
+  @ApiResponse({
+    status: HttpStatus.FORBIDDEN,
+    description: 'You can only update your own notes',
+  })
+  async toggleCompleted(@Param('id') id: string, @Request() req) {
+    const note = await this.chartNotesService.toggleCompleted(id, req.user.userId);
+    return {
+      statusCode: HttpStatus.OK,
+      message: 'Chart note status toggled successfully',
+      data: note,
     };
   }
 }

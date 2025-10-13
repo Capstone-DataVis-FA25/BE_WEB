@@ -1,4 +1,4 @@
-import { IsNotEmpty, IsString, IsUUID } from 'class-validator';
+import { IsNotEmpty, IsString, IsUUID, IsBoolean, IsOptional } from 'class-validator';
 import { ApiProperty } from '@nestjs/swagger';
 
 export class CreateChartNoteDto {
@@ -17,4 +17,14 @@ export class CreateChartNoteDto {
   @IsNotEmpty()
   @IsString()
   content: string;
+
+  @ApiProperty({
+    description: 'Whether the note is completed',
+    example: false,
+    required: false,
+    default: false,
+  })
+  @IsOptional()
+  @IsBoolean()
+  isCompleted?: boolean;
 }

@@ -1,6 +1,3 @@
-// This is your Prisma schema file,
-// learn more about it in the docs: https://pris.ly/d/prisma-schema
-
 generator client {
   provider = "prisma-client-js"
 }
@@ -10,107 +7,86 @@ datasource db {
   url      = env("DATABASE_URL")
 }
 
-enum UserRole {
-  USER
-  ADMIN
-}
-
-model User {
-  id        String   @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
-  email     String   @unique
-  password  String?
-  firstName String?
-  lastName  String?
-  role      UserRole @default(USER)
-  isActive  Boolean  @default(true)
-  isVerified Boolean @default(false)
-  createdAt DateTime @default(now())
-  updatedAt DateTime @updatedAt
-
-  currentHashedRefreshToken String?
-  currentVerifyToken        String?
-
-  // Relations
-  datasets Dataset[]
-  charts   Chart[]
-  chartNotes ChartNote[]
-}
-
-model Dataset {
-  id          String      @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
-  name        String      @unique
-  description String?
-  rowCount    Int
-  columnCount Int
-  
-  // Format fields for data parsing
-  thousandsSeparator String? @default(",")
-  decimalSeparator   String? @default(".")
-  dateFormat        String? @default("YYYY-MM-DD")
-  
-  createdAt   DateTime    @default(now())
-  updatedAt   DateTime    @updatedAt
-
-  // Relations
-  userId String @db.Uuid
-  user   User   @relation(fields: [userId], references: [id], onDelete: Cascade)
-
-  headers DataHeader[]
-  charts  Chart[]
-}
-
-model DataHeader {
-  id        String   @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
-  datasetId String   @db.Uuid
-  dataset   Dataset  @relation(fields: [datasetId], references: [id], onDelete: Cascade)
-
-  name      String
-  type      String
-  index     Int
-
-  // Encryption fields
-  encryptedData    String
-  iv               String
-  authTag          String
-  encryptedDataKey String
-}
-
 model Chart {
-  id          String   @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  id          String      @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
   name        String
   description String?
   type        String
   config      Json
-  createdAt   DateTime @default(now())
-  updatedAt   DateTime @updatedAt
-
-  // Relations
-  datasetId String?   @db.Uuid
-  dataset   Dataset?  @relation(fields: [datasetId], references: [id], onDelete: SetNull)
-
-  userId String @db.Uuid
-  user   User   @relation(fields: [userId], references: [id], onDelete: Cascade)
-
-  chartNotes ChartNote[]
+  createdAt   DateTime    @default(now())
+  updatedAt   DateTime    @updatedAt
+  datasetId   String?     @db.Uuid
+  userId      String      @db.Uuid
+  dataset     Dataset?    @relation(fields: [datasetId], references: [id])
+  user        User        @relation(fields: [userId], references: [id], onDelete: Cascade)
+  chartNotes  ChartNote[]
 }
 
 model ChartNote {
-  id        String   @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
-  content   String
-  timestamp String?  // Optional timestamp field for compatibility
-  createdAt DateTime @default(now())
-  updatedAt DateTime @updatedAt
-  deletedAt DateTime? // Soft delete support
+  id          String    @id(map: "chart_notes_pkey") @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  content     String
+  createdAt   DateTime  @default(now())
+  deletedAt   DateTime?
+  chartId     String    @db.Uuid
+  authorId    String    @db.Uuid
+  isCompleted Boolean   @default(false)
+  author      User      @relation(fields: [authorId], references: [id], onDelete: Cascade, map: "chart_notes_authorId_fkey")
+  chart       Chart     @relation(fields: [chartId], references: [id], onDelete: Cascade, map: "chart_notes_chartId_fkey")
 
-  // Relations
-  chartId  String @db.Uuid
-  chart    Chart  @relation(fields: [chartId], references: [id], onDelete: Cascade)
+  @@index([authorId], map: "chart_notes_authorId_idx")
+  @@index([chartId], map: "chart_notes_chartId_idx")
+  @@index([deletedAt], map: "chart_notes_deletedAt_idx")
+}
 
-  authorId String @db.Uuid
-  author   User   @relation(fields: [authorId], references: [id], onDelete: Cascade)
+model DataHeader {
+  id               String  @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  name             String
+  type             String
+  index            Int
+  encryptedData    String
+  iv               String
+  authTag          String
+  encryptedDataKey String
+  datasetId        String  @db.Uuid
+  dataset          Dataset @relation(fields: [datasetId], references: [id], onDelete: Cascade)
+}
 
-  @@index([chartId])
-  @@index([authorId])
-  @@index([deletedAt])
-  @@map("chart_notes")
+model Dataset {
+  id                 String       @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  name               String       @unique
+  description        String?
+  rowCount           Int
+  columnCount        Int
+  createdAt          DateTime     @default(now())
+  updatedAt          DateTime     @updatedAt
+  userId             String       @db.Uuid
+  dateFormat         String?      @default("YYYY-MM-DD")
+  decimalSeparator   String?      @default(".")
+  thousandsSeparator String?      @default(",")
+  charts             Chart[]
+  headers            DataHeader[]
+  user               User         @relation(fields: [userId], references: [id], onDelete: Cascade)
+}
+
+model User {
+  id                        String      @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  email                     String      @unique
+  password                  String?
+  firstName                 String?
+  lastName                  String?
+  role                      UserRole    @default(USER)
+  isActive                  Boolean     @default(true)
+  isVerified                Boolean     @default(false)
+  createdAt                 DateTime    @default(now())
+  updatedAt                 DateTime    @updatedAt
+  currentHashedRefreshToken String?
+  currentVerifyToken        String?
+  charts                    Chart[]
+  chartNotes                ChartNote[]
+  datasets                  Dataset[]
+}
+
+enum UserRole {
+  USER
+  ADMIN
 }

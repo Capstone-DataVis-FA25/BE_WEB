@@ -46,8 +46,8 @@ export class ChartNotesService {
   }
 
   /**
-   * Get a specific note by ID
-   */
+    * Get a specific note by ID
+  */
   async findOne(id: string) {
     const note = await this.prisma.prisma.chartNote.findFirst({
       where: {
@@ -77,7 +77,7 @@ export class ChartNotesService {
    * Create a new chart note
    */
   async create(createChartNoteDto: CreateChartNoteDto, userId: string) {
-    const { chartId, content } = createChartNoteDto;
+    const { chartId, content, isCompleted } = createChartNoteDto;
 
     // Check if chart exists
     const chart = await this.prisma.prisma.chart.findUnique({
@@ -94,7 +94,7 @@ export class ChartNotesService {
         content,
         chartId,
         authorId: userId,
-        timestamp: new Date().toISOString(),
+        isCompleted: isCompleted ?? false,
       },
       include: {
         author: {
@@ -122,11 +122,18 @@ export class ChartNotesService {
       throw new ForbiddenException('You can only update your own notes');
     }
 
+    const updateData: any = {};
+    if (updateChartNoteDto.content !== undefined) {
+      updateData.content = updateChartNoteDto.content;
+    }
+    console.log('updateChartNoteDto: ', updateChartNoteDto.isCompleted)
+    if (updateChartNoteDto.isCompleted !== undefined) {
+      updateData.isCompleted = updateChartNoteDto.isCompleted;
+    }
+
     const updatedNote = await this.prisma.prisma.chartNote.update({
       where: { id },
-      data: {
-        content: updateChartNoteDto.content,
-      },
+      data: updateData,
       include: {
         author: {
           select: {
@@ -163,6 +170,37 @@ export class ChartNotesService {
     });
 
     return { message: 'Note deleted successfully' };
+  }
+
+  /**
+   * Toggle the completed status of a chart note
+   */
+  async toggleCompleted(id: string, userId: string) {
+    const note = await this.findOne(id);
+
+    // Check if user is the author
+    if (note.authorId !== userId) {
+      throw new ForbiddenException('You can only update your own notes');
+    }
+
+    const updatedNote = await this.prisma.prisma.chartNote.update({
+      where: { id },
+      data: {
+        isCompleted: !note.isCompleted,
+      },
+      include: {
+        author: {
+          select: {
+            id: true,
+            email: true,
+            firstName: true,
+            lastName: true,
+          },
+        },
+      },
+    });
+
+    return updatedNote;
   }
 
   /**
