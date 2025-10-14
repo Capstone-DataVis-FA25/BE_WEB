@@ -1,30 +1,101 @@
 import { Injectable, InternalServerErrorException, Logger, BadRequestException } from '@nestjs/common';
+import type { Multer } from 'multer';
 import { ConfigService } from '@nestjs/config';
-import { CleanCsvDto } from './dto/clean-csv.dto';
 import * as XLSX from 'xlsx';
 import * as fs from 'fs';
-
+import { CleanCsvDto } from './dto/clean-csv.dto';
 
 @Injectable()
-export class AiCleanerService {
-  private readonly logger = new Logger(AiCleanerService.name);
+export class AiService {
+  private readonly logger = new Logger(AiService.name);
+  private readonly baseUrl = 'https://openrouter.ai/api/v1';
+  private readonly model = 'openai/gpt-4o-mini';
+  private readonly apiKey: string;
 
-  constructor(private readonly configService: ConfigService) {}
+  constructor(private readonly configService: ConfigService) {
+    this.apiKey = this.configService.get<string>('OPENROUTER_API_KEY') || '';
+  }
+
+  private getCommonHeaders(apiKey: string) {
+    return {
+      'Content-Type': 'application/json',
+      Authorization: `Bearer ${apiKey}`,
+      'HTTP-Referer': 'http://localhost:3000', // hoặc domain thật khi deploy
+      'X-Title': 'DataVis Assistant',
+    };
+  }
+
+  async chatWithAi(message?: string, messagesJson?: string, languageCode?: string) {
+    const start = Date.now();
+    if (!message) throw new Error('Vui lòng cung cấp message');
+
+    interface HistMsg { role: 'user' | 'assistant'; content: string; }
+    let history: HistMsg[] = [];
+    if (messagesJson) {
+      try {
+        const parsed = JSON.parse(messagesJson);
+        if (Array.isArray(parsed))
+          history = parsed.filter(m => m && (m.role === 'user' || m.role === 'assistant') && typeof m.content === 'string');
+      } catch { /* ignore */ }
+    }
+
+    const targetLang = languageCode || 'auto';
+    if (!this.apiKey) {
+      this.logger.error('OPENROUTER_API_KEY is not configured');
+      throw new InternalServerErrorException('AI service is not configured');
+    }
+
+    const systemPrompt = `You are a statistics and data visualization expert. You are assisting users on a website about data visualization. Answer all questions as a professional statistician and data visualization consultant. Give clear, practical, and actionable advice about charts, analytics, and best practices. If the question is not about data visualization/statistics, politely redirect to relevant topics. Answer in language: ${targetLang}.`;
+
+    const modelMessages = [
+      { role: 'system', content: systemPrompt },
+      ...history.slice(-16),
+      { role: 'user', content: message },
+    ];
+
+    const body = { model: this.model, messages: modelMessages, temperature: 0 } as const;
+    const url = `${this.baseUrl}/chat/completions`;
+    const res = await fetch(url, {
+      method: 'POST',
+      headers: this.getCommonHeaders(this.apiKey),
+      body: JSON.stringify(body),
+    });
+
+    if (!res.ok) {
+      const text = await res.text().catch(() => '');
+      this.logger.error(`OpenRouter API error: ${res.status} ${res.statusText} ${text}`);
+      throw new InternalServerErrorException('Failed to get AI response');
+    }
+
+    const data = await res.json();
+    const reply = this.cleanAnswer(data?.choices?.[0]?.message?.content ?? '');
+    if (!reply) {
+      this.logger.error('OpenRouter API returned no content');
+      throw new InternalServerErrorException('AI returned empty response');
+    }
+
+    return {
+      reply,
+      processingTime: ((Date.now() - start) / 1000).toFixed(2) + 's',
+      messageCount: history.length + 1,
+      language: targetLang,
+      success: true,
+    };
+  }
+
+  cleanAnswer(raw: string): string {
+    return raw?.trim() || '';
+  }
 
   async cleanCsv(payload: CleanCsvDto): Promise<string> {
-    const apiKey = this.configService.get<string>('OPENROUTER_API_KEY');
-    const baseUrl = 'https://openrouter.ai/api/v1';
-    const model = 'alibaba/tongyi-deepresearch-30b-a3b:free'; // hoặc model khác nếu cần, có thể cho phép truyền từ FE nếu muốn
-
-    if (!apiKey) {
+    if (!this.apiKey) {
       this.logger.error('OPENROUTER_API_KEY is not configured');
       throw new InternalServerErrorException('AI service is not configured');
     }
 
     const systemPrompt = this.buildSystemPrompt(payload);
-
     const body = {
-      model,
+      model: this.model,
       messages: [
         { role: 'system', content: systemPrompt },
         { role: 'user', content: this.buildUserPrompt(payload) },
@@ -32,14 +103,10 @@ export class AiCleanerService {
       temperature: 0,
     } as const;
 
-    const url = `${baseUrl}/chat/completions`;
-
+    const url = `${this.baseUrl}/chat/completions`;
     const res = await fetch(url, {
       method: 'POST',
-      headers: {
-        'Content-Type': 'application/json',
-        'Authorization': `Bearer ${apiKey}`,
-      },
+      headers: this.getCommonHeaders(this.apiKey),
       body: JSON.stringify(body),
     });
 
@@ -49,14 +116,12 @@ export class AiCleanerService {
       throw new InternalServerErrorException('Failed to clean CSV');
     }
 
-    const data = (await res.json()) as any;
+    const data = await res.json();
     const cleanedCsv = data?.choices?.[0]?.message?.content?.trim();
-
     if (!cleanedCsv) {
-      this.logger.error(`OpenRouter API returned no content`);
+      this.logger.error('OpenRouter API returned no content');
       throw new InternalServerErrorException('AI returned empty response');
     }
-
     return cleanedCsv;
   }
 
@@ -68,19 +133,13 @@ export class AiCleanerService {
       'Do not invent data. If a value is invalid and cannot be fixed deterministically, leave it blank.',
       'Escape commas, quotes, and line breaks according to RFC 4180 as needed.',
     ];
-
-    if (payload.schemaExample) {
+    if (payload.schemaExample)
       rules.push('Follow the provided CSV schema example strictly for columns order and sample types.');
-    }
     if (payload.thousandsSeparator || payload.decimalSeparator) {
-      rules.push(
-        `For numeric columns, use thousands separator "${payload.thousandsSeparator ?? ''}" and decimal separator "${payload.decimalSeparator ?? ''}".`,
-      );
+      rules.push(`For numeric columns, use thousands separator "${payload.thousandsSeparator ?? ''}" and decimal separator "${payload.decimalSeparator ?? ''}".`);
     }
-    if (payload.dateFormat) {
+    if (payload.dateFormat)
       rules.push(`Format all date-like values to match this date format exactly: ${payload.dateFormat}`);
-    }
-
     return rules.join('\n');
   }
 
@@ -92,50 +151,37 @@ export class AiCleanerService {
     return preface.join('\n\n');
   }
 
-  // New: clean uploaded Excel/CSV file and return a 2D JSON matrix
   async cleanExcelToMatrix(input: { file: any; options?: { thousandsSeparator?: string; decimalSeparator?: string; dateFormat?: string; schemaExample?: string; notes?: string } }): Promise<any[][]> {
     const { file, options } = input || {};
     if (!file) throw new BadRequestException('File is required');
-
     const buffer: Buffer = await this.resolveFileBuffer(file);
     const rows = this.extractRowsFromFile(buffer, file.originalname || file.filename || 'upload');
     if (!rows.length || !rows[0]?.length) throw new BadRequestException('Uploaded file has no data');
-
-    // Convert to CSV for more deterministic LLM cleaning
     const csv = this.rowsToCsv(rows);
 
-    const apiKey = this.configService.get<string>('OPENROUTER_API_KEY');
-    const baseUrl = 'https://openrouter.ai/api/v1';
-    const model = 'gpt-4o';
-    if (!apiKey) {
+    if (!this.apiKey) {
       this.logger.error('OPENROUTER_API_KEY is not configured');
       throw new InternalServerErrorException('AI service is not configured');
     }
 
     const systemPrompt = this.buildMatrixSystemPrompt(options || {});
     const userPrompt = this.buildMatrixUserPrompt({ csv, options: options || {} });
+    const body = { model: this.model, messages: [{ role: 'system', content: systemPrompt }, { role: 'user', content: userPrompt }], temperature: 0 } as const;
+    const url = `${this.baseUrl}/chat/completions`;
 
-    const body = {
-      model,
-      messages: [
-        { role: 'system', content: systemPrompt },
-        { role: 'user', content: userPrompt },
-      ],
-      temperature: 0,
-    } as const;
-
-    const url = `${baseUrl}/chat/completions`;
     const res = await fetch(url, {
       method: 'POST',
-      headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${apiKey}` },
+      headers: this.getCommonHeaders(this.apiKey),
       body: JSON.stringify(body),
     });
+
     if (!res.ok) {
       const text = await res.text().catch(() => '');
       this.logger.error(`OpenRouter API error: ${res.status} ${res.statusText} ${text}`);
       throw new InternalServerErrorException('Failed to clean Excel');
     }
-    const data = (await res.json()) as any;
+
+    const data = await res.json();
     const content = data?.choices?.[0]?.message?.content ?? '';
     const matrix = this.tryParseJsonMatrix(content);
     if (!matrix) {
@@ -149,7 +195,6 @@ export class AiCleanerService {
     if (file?.buffer) return file.buffer as Buffer;
     if (file?.path) {
       const buf = await fs.promises.readFile(file.path);
-      // Best effort cleanup for temp file
       fs.promises.unlink(file.path).catch(() => undefined);
       return buf;
     }
@@ -161,18 +206,15 @@ export class AiCleanerService {
     if (lower.endsWith('.csv')) {
       return this.csvToRows(buffer.toString('utf8'));
     }
-    // Use xlsx for xls/xlsx and other Excel formats
     const wb = XLSX.read(buffer, { type: 'buffer' });
     const sheetName = wb.SheetNames[0];
     if (!sheetName) return [];
     const ws = wb.Sheets[sheetName];
     const rows: any[][] = XLSX.utils.sheet_to_json(ws, { header: 1, blankrows: false, defval: '' });
-    // Trim trailing empty rows
     return rows.filter(r => (r || []).some(cell => String(cell ?? '').trim() !== ''));
   }
 
   private csvToRows(csv: string): any[][] {
-    // Minimal RFC4180 CSV parser for robustness; prefer to let AI do deep cleaning
     const lines = csv.replace(/\r\n/g, '\n').replace(/\r/g, '\n').split('\n');
     const rows: any[][] = [];
     for (const line of lines) {
@@ -190,24 +232,12 @@ export class AiCleanerService {
       const ch = line[i];
       if (inQuotes) {
         if (ch === '"') {
-          if (line[i + 1] === '"') {
-            current += '"';
-            i++;
-          } else {
-            inQuotes = false;
-          }
-        } else {
-          current += ch;
-        }
+          if (line[i + 1] === '"') { current += '"'; i++; } else { inQuotes = false; }
+        } else { current += ch; }
       } else {
-        if (ch === ',') {
-          result.push(current);
-          current = '';
-        } else if (ch === '"') {
-          inQuotes = true;
-        } else {
-          current += ch;
-        }
+        if (ch === ',') { result.push(current); current = ''; }
+        else if (ch === '"') { inQuotes = true; }
+        else { current += ch; }
       }
     }
     result.push(current);
@@ -216,17 +246,15 @@ export class AiCleanerService {
 
   private rowsToCsv(rows: any[][]): string {
     return rows
-      .map(r =>
-        r
-          .map((v) => {
-            const s = String(v ?? '');
-            if (s.includes('"') || s.includes(',') || /\r|\n/.test(s)) {
-              return '"' + s.replace(/"/g, '""') + '"';
-            }
-            return s;
-          })
-          .join(',')
-      )
+      .map(r => r
+        .map((v) => {
+          const s = String(v ?? '');
+          if (s.includes('"') || s.includes(',') || /\r|\n/.test(s)) {
+            return '"' + s.replace(/"/g, '""') + '"';
+          }
+          return s;
+        })
+        .join(','))
       .join('\n');
   }
 
@@ -241,9 +269,8 @@ export class AiCleanerService {
     if (opts.thousandsSeparator || opts.decimalSeparator) {
       rules.push(`For numeric cells, format with thousands separator "${opts.thousandsSeparator ?? ''}" and decimal separator "${opts.decimalSeparator ?? ''}".`);
     }
-    if (opts.dateFormat) {
+    if (opts.dateFormat)
       rules.push(`Convert all date-like values to this exact date format: ${opts.dateFormat}.`);
-    }
     rules.push('Ensure the output is valid JSON and nothing else.');
     return rules.join('\n');
   }
@@ -260,23 +287,20 @@ export class AiCleanerService {
 
   private tryParseJsonMatrix(content: string): any[][] | null {
     let text = (content || '').trim();
-    // Strip markdown fences if present
     if (text.startsWith('```')) {
       text = text.replace(/^```[\s\S]*?\n/, '').replace(/```\s*$/, '').trim();
     }
-    // Try direct parse
     try {
       const parsed = JSON.parse(text);
-      if (Array.isArray(parsed) && parsed.every((r) => Array.isArray(r))) return parsed as any[][];
+      if (Array.isArray(parsed) && parsed.every((r) => Array.isArray(r))) return parsed;
     } catch {}
-    // Fallback: extract first balanced [ ... ]
     const first = text.indexOf('[');
     const last = text.lastIndexOf(']');
     if (first !== -1 && last !== -1 && last > first) {
       const sub = text.slice(first, last + 1);
       try {
         const parsed = JSON.parse(sub);
-        if (Array.isArray(parsed) && parsed.every((r) => Array.isArray(r))) return parsed as any[][];
+        if (Array.isArray(parsed) && parsed.every((r) => Array.isArray(r))) return parsed;
       } catch {}
     }
     return null;

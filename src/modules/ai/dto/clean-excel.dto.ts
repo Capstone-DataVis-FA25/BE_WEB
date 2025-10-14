@@ -2,11 +2,7 @@ import { ApiProperty, ApiPropertyOptional } from '@nestjs/swagger';
 import { IsOptional, IsString, MaxLength } from 'class-validator';
 
 export class CleanExcelUploadDto {
-  @ApiProperty({
-    description: 'Excel file to clean (XLSX/XLS/CSV)',
-    type: 'string',
-    format: 'binary',
-  })
+  @ApiProperty({ description: 'Excel/CSV file', type: 'string', format: 'binary' })
   file: any;
 
   @ApiPropertyOptional({ description: 'Thousands separator', example: ',' })
@@ -27,16 +23,13 @@ export class CleanExcelUploadDto {
   @MaxLength(100)
   dateFormat?: string;
 
-  @ApiPropertyOptional({
-    description: 'Small CSV excerpt showing desired header order and sample rows',
-    example: 'Name,Age,City,Salary\nJohn Doe,28,New York,1234.56',
-  })
+  @ApiPropertyOptional({ description: 'Schema example CSV' })
   @IsOptional()
   @IsString()
   @MaxLength(100_000)
   schemaExample?: string;
 
-  @ApiPropertyOptional({ description: 'Additional cleaning notes' })
+  @ApiPropertyOptional({ description: 'Cleaning notes' })
   @IsOptional()
   @IsString()
   @MaxLength(5_000)
