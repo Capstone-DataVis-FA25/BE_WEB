@@ -16,6 +16,7 @@ import { DatasetsModule } from "@modules/datasets/datasets.module";
 import { KmsModule } from "@modules/kms/kms.module";
 import { ChartsModule } from "@modules/charts/charts.module";
 import { AiModule } from "@modules/ai/ai.module";
+import { ChartNotesModule } from "@modules/chart-notes/chart-notes.module";
 
 @Module({
   imports: [
@@ -50,7 +51,8 @@ import { AiModule } from "@modules/ai/ai.module";
     DatasetsModule,
     KmsModule,
     ChartsModule,
-  AiModule,
+    AiModule,
+    ChartNotesModule,
   ],
   controllers: [AppController],
   providers: [
