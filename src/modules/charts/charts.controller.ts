@@ -23,8 +23,8 @@ import { CreateChartDto } from "./dto/create-chart.dto";
 import { UpdateChartDto } from "./dto/update-chart.dto";
 import { JwtAccessTokenGuard } from "@modules/auth/guards/jwt-access-token.guard";
 import { AuthRequest } from "@modules/auth/auth.controller";
-import { PayloadSizeLimitPipe } from '../../pipes/payload-size-limit.pipe';
-import { AppConstants } from '../../constant/app.constants';
+import { PayloadSizeLimitPipe } from "../../pipes/payload-size-limit.pipe";
+import { AppConstants } from "../../constant/app.constants";
 
 @ApiTags("charts")
 @Controller("charts")
@@ -48,9 +48,11 @@ export class ChartsController {
   @ApiBody({ type: CreateChartDto })
   @UsePipes(new PayloadSizeLimitPipe(AppConstants.CHART_PAYLOAD_MAX_SIZE))
   create(@Body() createChartDto: CreateChartDto, @Request() req: AuthRequest) {
-    console.log('🔍 Controller received request body:', {
+    console.log("🔍 Controller received request body:", {
       ...createChartDto,
-      config: createChartDto.config ? JSON.stringify(createChartDto.config) : 'MISSING/UNDEFINED',
+      config: createChartDto.config
+        ? JSON.stringify(createChartDto.config)
+        : "MISSING/UNDEFINED",
     });
     return this.chartsService.create(createChartDto, req.user.userId);
   }

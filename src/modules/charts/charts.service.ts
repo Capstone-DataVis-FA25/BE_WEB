@@ -125,10 +125,10 @@ export class ChartsService {
   async create(createChartDto: CreateChartDto, userId: string) {
     console.log("🔍 Service received DTO:", {
       keys: Object.keys(createChartDto),
-      hasConfig: 'config' in createChartDto,
+      hasConfig: "config" in createChartDto,
       configValue: createChartDto.config,
       configType: typeof createChartDto.config,
-      fullDTO: JSON.stringify(createChartDto, null, 2)
+      fullDTO: JSON.stringify(createChartDto, null, 2),
     });
 
     const { name, description, type, config, datasetId } = createChartDto;
