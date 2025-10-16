@@ -10,6 +10,7 @@ import { JwtModule } from "@nestjs/jwt";
 import { UsersModule } from "../users/users.module";
 import { GoogleAuthService } from "./google-auth.service";
 import { EmailModule } from "@modules/email/email.module";
+import { RolesGuard } from "./guards/roles.guard";
 
 @Module({
   imports: [UsersModule, PassportModule, EmailModule, JwtModule.register({})],
@@ -21,6 +22,8 @@ import { EmailModule } from "@modules/email/email.module";
     GoogleStrategy,
     JwtAccessTokenStrategy,
     JwtRefreshTokenStrategy,
+    RolesGuard,
   ],
+  exports: [RolesGuard],
 })
-export class AuthModule {}
+export class AuthModule { }

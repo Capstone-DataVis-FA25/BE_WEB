@@ -16,6 +16,10 @@ import { UpdateUserDto } from './dto/update-user.dto';
 import { ChangePasswordDTO } from './dto/change-password.dto';
 import { JwtAccessTokenGuard } from '@modules/auth/guards/jwt-access-token.guard';
 import { AuthRequest } from '@modules/auth/auth.controller';
+import { LockUnlockUserDto } from './dto/lock-unlock-user.dto';
+import { Roles } from 'src/decorators/roles.decorator';
+import { RolesGuard } from '@modules/auth/guards/roles.guard';
+import { UserRole } from './dto/create-user.dto';
 
 
 @ApiTags('users')
@@ -32,7 +36,9 @@ export class UsersController {
 	}
 
 	@Get()
-	@ApiOperation({ summary: 'Get all users' })
+	@UseGuards(JwtAccessTokenGuard, RolesGuard)
+	@Roles(UserRole.ADMIN)
+	@ApiOperation({ summary: 'Get all users (Admin only)' })
 	@ApiResponse({ status: 200, description: 'List of users' })
 	findAll() {
 		return this.usersService.findAll();
@@ -81,5 +87,18 @@ export class UsersController {
 	@ApiBody({ schema: { properties: { email: { type: 'string' } } } })
 	remove(@Param('id') id: string, @Body('email') email: string) {
 		return this.usersService.remove(id, email);
+	}
+
+	// Admin lock/unlock user
+	@Patch(':id/lock-unlock')
+	@UseGuards(JwtAccessTokenGuard, RolesGuard)
+	@Roles(UserRole.ADMIN)
+	@ApiOperation({ summary: 'Lock or unlock a user (Admin only)' })
+	@ApiResponse({ status: 200, description: 'User lock/unlock status updated successfully' })
+	lockUnlockUser(
+		@Param('id') id: string,
+		@Body() lockUnlockUserDto: LockUnlockUserDto
+	) {
+		return this.usersService.lockUnlockUser(id, lockUnlockUserDto.isActive);
 	}
 }
