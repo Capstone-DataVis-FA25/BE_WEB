@@ -48,6 +48,10 @@ export class ChartsController {
   @ApiBody({ type: CreateChartDto })
   @UsePipes(new PayloadSizeLimitPipe(AppConstants.CHART_PAYLOAD_MAX_SIZE))
   create(@Body() createChartDto: CreateChartDto, @Request() req: AuthRequest) {
+    console.log('🔍 Controller received request body:', {
+      ...createChartDto,
+      config: createChartDto.config ? JSON.stringify(createChartDto.config) : 'MISSING/UNDEFINED',
+    });
     return this.chartsService.create(createChartDto, req.user.userId);
   }
 
