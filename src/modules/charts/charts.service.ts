@@ -124,168 +124,7 @@ export class ChartsService {
 
   async create(createChartDto: CreateChartDto, userId: string) {
     const { name, description, type, config, datasetId } = createChartDto;
-
-    // Extract nested config structure
-    const chartConfig = config.config;
-    const formatters = config.formatters;
-    const seriesConfigs = config.seriesConfigs || [];
-
-    // Verify that the dataset exists and belongs to the user
-    const dataset = await this.prismaService.prisma.dataset.findUnique({
-      where: { id: datasetId },
-    });
-
-    if (!dataset) {
-      throw new NotFoundException("Dataset not found");
-    }
-
-    if (dataset.userId !== userId) {
-      throw new ForbiddenException("You do not have access to this dataset");
-    }
-
-    // Load all headers for this dataset to resolve selectors
-    const headers = await this.prismaService.prisma.dataHeader.findMany({
-      where: { datasetId },
-      orderBy: { index: "asc" },
-      select: { id: true, name: true, index: true, type: true },
-    });
-
-    if (!headers || headers.length === 0) {
-      throw new BadRequestException("Dataset has no headers to build chart");
-    }
-
-    // Resolve X header ID: prefer xAxisKey, then index, then name; if none, auto-detect
-    let resolvedXId: string | undefined = chartConfig?.xAxisKey;
-    if (!resolvedXId && typeof chartConfig?.xAxisIndex === "number") {
-      const byIndex = headers.find((h) => h.index === chartConfig.xAxisIndex);
-      resolvedXId = byIndex?.id;
-    }
-    if (!resolvedXId && chartConfig?.xAxisName) {
-      const byName = headers.find((h) => h.name === chartConfig.xAxisName);
-      resolvedXId = byName?.id;
-    }
-    if (!resolvedXId) {
-      // Auto-detect X: prefer first non-numeric column (e.g., string/date). Fallback to first header.
-      const nonNumeric = headers.find(
-        (h) => h.type && h.type.toLowerCase() !== "number"
-      );
-      resolvedXId = (nonNumeric || headers[0]).id;
-    }
-
-    // Resolve Y header IDs: prefer yAxisKeys, then indices, then names; if none, auto-detect
-    let resolvedYIds: string[] | undefined =
-      Array.isArray(chartConfig?.yAxisKeys) && chartConfig.yAxisKeys.length > 0
-        ? chartConfig.yAxisKeys
-        : undefined;
-    if (!resolvedYIds && Array.isArray(chartConfig?.yAxisIndices)) {
-      resolvedYIds = chartConfig.yAxisIndices
-        .map((idx) => headers.find((h) => h.index === idx)?.id)
-        .filter((id): id is string => Boolean(id));
-    }
-    if (!resolvedYIds && Array.isArray(chartConfig?.yAxisNames)) {
-      resolvedYIds = chartConfig.yAxisNames
-        .map((nm) => headers.find((h) => h.name === nm)?.id)
-        .filter((id): id is string => Boolean(id));
-    }
-    if (!resolvedYIds || resolvedYIds.length === 0) {
-      // Auto-detect Y: pick numeric columns excluding X; if none numeric, pick all except X
-      const xId = resolvedXId;
-      const numericYs = headers
-        .filter(
-          (h) => h.id !== xId && h.type && h.type.toLowerCase() === "number"
-        )
-        .map((h) => h.id);
-      resolvedYIds =
-        numericYs.length > 0
-          ? numericYs
-          : headers.filter((h) => h.id !== xId).map((h) => h.id);
-      if (!resolvedYIds || resolvedYIds.length === 0) {
-        throw new BadRequestException(
-          "Unable to auto-detect yAxis from dataset headers"
-        );
-      }
-    }
-
-    // Validate resolved IDs belong to dataset
-    const xExists = headers.some((h) => h.id === resolvedXId);
-    if (!xExists) {
-      throw new BadRequestException("xAxisKey does not exist in this dataset");
-    }
-    const yValidCount = resolvedYIds.filter((id) =>
-      headers.some((h) => h.id === id)
-    ).length;
-    if (yValidCount !== resolvedYIds.length) {
-      throw new BadRequestException(
-        "One or more yAxisKeys do not exist in this dataset"
-      );
-    }
-
-    // Derive axis labels from headers when not provided
-    const xHeaderMeta = headers.find((h) => h.id === resolvedXId);
-    const yHeaderMetas = headers.filter((h) => resolvedYIds.includes(h.id));
-    const derivedXAxisLabel =
-      chartConfig.xAxisLabel ?? xHeaderMeta?.name ?? "X";
-    const derivedYAxisLabels =
-      Array.isArray((chartConfig as any)["yAxisLabels"]) &&
-      (chartConfig as any)["yAxisLabels"].length > 0
-        ? (chartConfig as any)["yAxisLabels"]
-        : yHeaderMetas.map((h) => h.name || "").filter(Boolean);
-    const derivedYAxisLabel =
-      chartConfig.yAxisLabel ??
-      (derivedYAxisLabels.length > 0 ? derivedYAxisLabels.join(", ") : "Y");
-
-    // Auto-generate seriesConfigs based on yAxisKeys if not provided or empty
-    let finalSeriesConfigs = seriesConfigs;
-    if (!finalSeriesConfigs || finalSeriesConfigs.length === 0) {
-      // Default color palette if not provided in chartConfig
-      const defaultColorPalette = [
-        "#3b82f6",
-        "#ef4444",
-        "#10b981",
-        "#f59e0b",
-        "#8b5cf6",
-        "#f97316",
-      ];
-
-      // Use colorPalette from chartConfig or fallback to default
-      const colorPalette =
-        chartConfig?.colorPalette && chartConfig.colorPalette.length > 0
-          ? chartConfig.colorPalette
-          : defaultColorPalette;
-
-      // Generate seriesConfigs for each yAxisKey
-      finalSeriesConfigs = resolvedYIds.map((yAxisId, index) => {
-        const headerMeta = headers.find((h) => h.id === yAxisId);
-        const colorIndex = index % colorPalette.length;
-
-        return {
-          id: `series-${Date.now()}-${index}`,
-          name: headerMeta?.name || `Series ${index + 1}`,
-          dataColumn: yAxisId,
-          color: colorPalette[colorIndex],
-          visible: true,
-        };
-      });
-    }
-
-    // Build sanitized config for storage: preserve full nested structure from frontend
-    const sanitizedConfig = {
-      // Main chart config with resolved axis IDs
-      config: {
-        ...chartConfig,
-        // Override with resolved axis IDs
-        xAxisKey: resolvedXId,
-        yAxisKeys: resolvedYIds,
-        xAxisLabel: derivedXAxisLabel,
-        yAxisLabel: derivedYAxisLabel,
-        yAxisLabels: derivedYAxisLabels,
-      },
-      // Preserve formatters from frontend
-      formatters: formatters,
-      // Use auto-generated or provided seriesConfigs
-      seriesConfigs: finalSeriesConfigs,
-    } as any;
-
+    console.log("Creating chart with config:", config);
     // Database operation with error handling
     try {
       return await this.prismaService.prisma.chart.create({
@@ -295,7 +134,7 @@ export class ChartsService {
           name,
           description: description || null,
           type,
-          config: sanitizedConfig as unknown as any,
+          config: config
         },
       });
     } catch (error) {
@@ -337,79 +176,11 @@ export class ChartsService {
         }
       }
 
-      // Sync seriesConfigs with yAxisKeys if config is being updated
-      let processedUpdateDto = { ...updateChartDto };
-
-      if (updateChartDto.config?.config?.yAxisKeys) {
-        const yAxisKeys = updateChartDto.config.config.yAxisKeys;
-        const currentSeriesConfigs = updateChartDto.config.seriesConfigs || [];
-
-        // Get dataset headers for this chart or updated dataset
-        const datasetId = updateChartDto.datasetId || (await this.validateOwnership(id, userId)).datasetId;
-        const headers = await this.prismaService.prisma.dataHeader.findMany({
-          where: { datasetId },
-          orderBy: { index: "asc" },
-          select: { id: true, name: true, index: true, type: true },
-        });
-
-        // Default color palette
-        const defaultColorPalette = [
-          "#3b82f6",
-          "#ef4444",
-          "#10b981",
-          "#f59e0b",
-          "#8b5cf6",
-          "#f97316",
-        ];
-
-        // Use colorPalette from chartConfig or fallback to default
-        const colorPalette =
-          updateChartDto.config.config?.colorPalette &&
-          updateChartDto.config.config.colorPalette.length > 0
-            ? updateChartDto.config.config.colorPalette
-            : defaultColorPalette;
-
-        // Sync seriesConfigs with yAxisKeys
-        const syncedSeriesConfigs = yAxisKeys.map((yAxisId, index) => {
-          // Try to find existing series config for this dataColumn
-          const existingSeries = currentSeriesConfigs.find(
-            (series) => series.dataColumn === yAxisId
-          );
-
-          if (existingSeries) {
-            // Keep existing series but ensure correct color index
-            return {
-              ...existingSeries,
-              color:
-                existingSeries.color ||
-                colorPalette[index % colorPalette.length],
-            };
-          } else {
-            // Create new series for this yAxisKey
-            const headerMeta = headers.find((h) => h.id === yAxisId);
-            return {
-              id: `series-${Date.now()}-${index}`,
-              name: headerMeta?.name || `Series ${index + 1}`,
-              dataColumn: yAxisId,
-              color: colorPalette[index % colorPalette.length],
-              visible: true,
-            };
-          }
-        });
-
-        // Update the config with synced seriesConfigs
-        processedUpdateDto = {
-          ...updateChartDto,
-          config: {
-            ...updateChartDto.config,
-            seriesConfigs: syncedSeriesConfigs,
-          },
-        };
-      }
+      console.log('Updating chart with config:', updateChartDto.config);
       // Frontend sends complete config, no need for backend defaults
       const updatedChart = await this.prismaService.prisma.chart.update({
         where: { id },
-        data: processedUpdateDto,
+        data: updateChartDto,
         include: {
           dataset: {
             include: {
@@ -490,23 +261,16 @@ export class ChartsService {
       const config = chart.config;
       const headers = chart.dataset.headers;
 
-      console.log("headers", headers);
-      console.log("original config", config);
-
       // Create a map of header ID to header name for quick lookup
       const headerMap = new Map<string, string>();
       headers.forEach((header) => {
         headerMap.set(header.id, header.name);
       });
-      // Print headerMap
-      console.log("headerMap", headerMap);
-
       // Create enhanced config with resolved names
       const enhancedConfig = { ...config };
 
       // Replace xAxisKey UUID with header name
       if (config.config?.xAxisKey && headerMap.has(config.config.xAxisKey)) {
-        console.log("xAxisKey", config.config.xAxisKey);
         enhancedConfig.config.xAxisKey = headerMap.get(config.config.xAxisKey);
       }
 
@@ -516,8 +280,6 @@ export class ChartsService {
           headerMap.has(key) ? headerMap.get(key) : key
         );
       }
-
-      console.log("enhanced config", enhancedConfig);
 
       // Return chart with enhanced config and additional metadata
       return {

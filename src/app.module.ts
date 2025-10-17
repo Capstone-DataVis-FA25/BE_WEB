@@ -15,6 +15,7 @@ import { EmailModule } from "@modules/email/email.module";
 import { DatasetsModule } from "@modules/datasets/datasets.module";
 import { KmsModule } from "@modules/kms/kms.module";
 import { ChartsModule } from "@modules/charts/charts.module";
+import { ChartNotesModule } from "@modules/chart-notes/chart-notes.module";
 import { SystemModule } from "@modules/system/system.module";
 
 @Module({
@@ -45,7 +46,6 @@ import { SystemModule } from "@modules/system/system.module";
     DatasetsModule,
     KmsModule,
     ChartsModule,
-    SystemModule,
   ],
   controllers: [AppController],
   providers: [
