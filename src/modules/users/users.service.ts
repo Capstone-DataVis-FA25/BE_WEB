@@ -1,8 +1,10 @@
+import { ActivityService } from './../activity/activity.service';
 import {
   Injectable,
   BadRequestException,
   NotFoundException,
   UnauthorizedException,
+  Logger,
 } from "@nestjs/common";
 import { PrismaService } from "../../prisma/prisma.service";
 import { CreateUserDto, UserRole } from "./dto/create-user.dto";
@@ -14,7 +16,9 @@ import { Messages } from "src/constant/message-config";
 
 @Injectable()
 export class UsersService {
-  constructor(private prismaService: PrismaService) { }
+  private readonly logger = new Logger(UsersService.name);
+
+  constructor(private prismaService: PrismaService, private activityService: ActivityService) { }
 
   async create(createUserDto: CreateUserDto): Promise<User> {
     // Hash password only if provided (for Google OAuth users, password might be undefined)
@@ -231,18 +235,37 @@ export class UsersService {
     userId: string,
     isActive: boolean
   ): Promise<UserWithoutPassword> {
-    const user = await this.prismaService.prisma.user.update({
-      where: { id: userId },
-      data: {
-        isActive: isActive,
-      },
-      omit: {
-        password: true,
-        currentHashedRefreshToken: true,
-        currentVerifyToken: true,
-      }
-    });
+    try {
+      const user = await this.prismaService.prisma.user.update({
+        where: { id: userId },
+        data: {
+          isActive: isActive,
+        },
+        omit: {
+          password: true,
+          currentHashedRefreshToken: true,
+          currentVerifyToken: true,
+        }
+      });
 
-    return user as UserWithoutPassword;
+      // Create activity log
+      try {
+        await this.activityService.createLog({
+          actorId: userId,
+          actorType: "USER",
+          action: isActive ? "LOCK_USER" : "UNLOCK_USER",
+          resource: "USER",
+          metadata: { userId, isActive },
+        });
+      } catch (activityError) {
+        this.logger.error('Failed to create activity log:', activityError);
+        // Don't throw here as the main operation (lock/unlock) should still succeed
+      }
+
+      return user as UserWithoutPassword;
+    } catch (error) {
+      this.logger.error('Failed to lock/unlock user:', error);
+      throw error;
+    }
   }
 }

@@ -88,3 +88,16 @@ enum UserRole {
   USER
   ADMIN
 }
+
+model ActivityLog {
+  id         String   @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  actorId    String?  @db.Uuid
+  actorType  String?                // e.g. "USER", "SYSTEM", "ADMIN"
+  action     String                 // e.g. "CREATE_DATASET", "LOGIN", ...
+  resource   String?                // e.g. "Dataset:uuid" or resource type/id
+  metadata   Json?
+  createdAt  DateTime @default(now())
+
+  @@index([createdAt])
+  @@index([actorId])
+}
