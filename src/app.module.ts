@@ -46,6 +46,8 @@ import { SystemModule } from "@modules/system/system.module";
     DatasetsModule,
     KmsModule,
     ChartsModule,
+    ChartNotesModule,
+    SystemModule,
   ],
   controllers: [AppController],
   providers: [
