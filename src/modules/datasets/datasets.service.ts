@@ -30,9 +30,9 @@ export class DatasetsService {
     }
 
     // Validate data types in headers
-    console.log('🔍 Validating headers:', headers.map(h => ({ name: h.name, type: h.type, dataLength: h.data.length })));
+   // console.log('🔍 Validating headers:', headers.map(h => ({ name: h.name, type: h.type, dataLength: h.data.length })));
     const validation = this.validateHeaderDataTypes(headers);
-    console.log('🔍 Validation result:', validation);
+   // console.log('🔍 Validation result:', validation);
     if (!validation.isValid) {
       throw new BadRequestException(`Data type validation failed: ${validation.errors.join(', ')}`);
     }
