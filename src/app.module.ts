@@ -5,7 +5,7 @@ import { AppController } from "./app.controller";
 import { AppService } from "./app.service";
 import { database_config } from "./configs/configuration.config";
 
-import { APP_FILTER } from "@nestjs/core";
+import { APP_FILTER, APP_INTERCEPTOR } from "@nestjs/core";
 import { GlobalExceptionFilter } from "./exception-filters/global-exception.filter";
 
 import { AuthModule } from "@modules/auth/auth.module";
@@ -17,6 +17,9 @@ import { KmsModule } from "@modules/kms/kms.module";
 import { ChartsModule } from "@modules/charts/charts.module";
 import { AiModule } from "@modules/ai/ai.module";
 import { ChartNotesModule } from "@modules/chart-notes/chart-notes.module";
+import { SystemModule } from "@modules/system/system.module";
+import { ActivityModule } from "@modules/activity/activity.module";
+import { ActivityAuditInterceptor } from "./interceptors/activity-audit.interceptor";
 
 @Module({
   imports: [
@@ -53,6 +56,8 @@ import { ChartNotesModule } from "@modules/chart-notes/chart-notes.module";
     ChartsModule,
     AiModule,
     ChartNotesModule,
+    SystemModule,
+    ActivityModule,
   ],
   controllers: [AppController],
   providers: [
@@ -60,6 +65,10 @@ import { ChartNotesModule } from "@modules/chart-notes/chart-notes.module";
     {
       provide: APP_FILTER,
       useClass: GlobalExceptionFilter,
+    },
+    {
+      provide: APP_INTERCEPTOR,
+      useClass: ActivityAuditInterceptor,
     },
   ],
 })

@@ -8,6 +8,7 @@ import { ValidationError } from "class-validator";
 import { ResponseInterceptor } from "./interceptors/response.interceptor";
 import { LoggingInterceptor } from "./interceptors/logging.interceptor";
 import { json, urlencoded } from "express";
+import { join } from "path";
 
 async function bootstrap() {
 	const logger = new Logger(bootstrap.name);
@@ -18,6 +19,9 @@ async function bootstrap() {
 		methods: "GET,HEAD,PUT,PATCH,POST,DELETE",
 		allowedHeaders: "*",
 	});
+
+	// Serve static files
+	app.useStaticAssets(join(__dirname, "..", "public"));
 
 	configSwagger(app);
 	const config_service = app.get(ConfigService);
@@ -48,7 +52,6 @@ async function bootstrap() {
 	// Increased payload limits
 	app.use(json({ limit: "15mb" }));
 	app.use(urlencoded({ extended: true, limit: "15mb" }));
-
 
 	await app.listen(port, () =>
 		logger.log(`🚀 Server running on: http://localhost:${port}/api-docs`)
