@@ -30,6 +30,47 @@ export class ActivityController {
       this.prisma.prisma.activityLog.count({ where }),
     ]);
 
-    return { data, total, page: pageNum, limit: take };
+    // Enhance the data with additional context before sending to frontend
+    const enhancedData = data.map(activity => {
+      // Parse metadata if it's a string
+      let metadata = activity.metadata;
+      if (typeof metadata === 'string') {
+        try {
+          metadata = JSON.parse(metadata);
+        } catch (e) {
+          metadata = {};
+        }
+      }
+
+      // Ensure metadata is an object
+      if (!metadata || typeof metadata !== 'object') {
+        metadata = {};
+      }
+
+      // Add a description field if not present
+      if (!metadata['description']) {
+        // Create a default description based on action and resource
+        let description = activity.action.replace(/_/g, ' ').toLowerCase();
+        description = description.charAt(0).toUpperCase() + description.slice(1);
+
+        if (activity.resource) {
+          description += ` - ${activity.resource}`;
+        }
+
+        return {
+          ...activity,
+          metadata: {
+            ...metadata,
+            description
+          }
+        };
+      }
+      return {
+        ...activity,
+        metadata
+      };
+    });
+
+    return { data: enhancedData, total, page: pageNum, limit: take };
   }
 }

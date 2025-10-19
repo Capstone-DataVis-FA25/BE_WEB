@@ -22,24 +22,10 @@ export class ActivityAuditInterceptor implements NestInterceptor {
     // user register
     {
       method: "POST",
-      pathRegex: /^\/auth\/register$/,
+      pathRegex: /^\/auth\/signup$/,
       action: "user_register",
       resource: () => "user",
       metadata: (req) => ({ email: req.body?.email }),
-    },
-    // block user
-    {
-      method: "POST",
-      pathRegex: /^\/admin\/users\/(.+)\/block$/,
-      action: "block_user",
-      resource: (req) => `user:${req.params?.id}`,
-    },
-    // unlock user
-    {
-      method: "POST",
-      pathRegex: /^\/admin\/users\/(.+)\/unlock$/,
-      action: "unlock_user",
-      resource: (req) => `user:${req.params?.id}`,
     },
     // create dataset
     {
@@ -55,18 +41,18 @@ export class ActivityAuditInterceptor implements NestInterceptor {
       pathRegex: /^\/charts$/,
       action: "create_chart",
       resource: (_req, _res, body) => `chart:${body?.id ?? ""}`,
-      metadata: (_req, _res, body) => ({ name: body?.name }),
+      metadata: (_req, _res, body) => ({ name: body?.name, type: body?.type }),
     },
     // self delete account
     {
       method: "DELETE",
-      pathRegex: /^\/users\/me$/,
+      pathRegex: /^\/users$/,
       action: "delete_self_account",
       resource: (req) => `user:${req.user?.user_id ?? "me"}`,
     },
   ];
 
-  constructor(private readonly activityService: ActivityService) {}
+  constructor(private readonly activityService: ActivityService) { }
 
   intercept(context: ExecutionContext, next: CallHandler): Observable<any> {
     if (context.getType() !== "http") return next.handle();

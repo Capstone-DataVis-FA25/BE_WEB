@@ -233,7 +233,8 @@ export class UsersService {
   // Lock or unlock a user (admin functionality)
   async lockUnlockUser(
     userId: string,
-    isActive: boolean
+    isActive: boolean,
+    adminUserId?: string  // Add admin user ID parameter
   ): Promise<UserWithoutPassword> {
     try {
       const user = await this.prismaService.prisma.user.update({
@@ -251,11 +252,15 @@ export class UsersService {
       // Create activity log
       try {
         await this.activityService.createLog({
-          actorId: userId,
+          actorId: adminUserId, // Use admin user ID as actor
           actorType: "USER",
-          action: isActive ? "LOCK_USER" : "UNLOCK_USER",
+          action: isActive ? "UNLOCK_USER" : "LOCK_USER",
           resource: "USER",
-          metadata: { userId, isActive },
+          metadata: {
+            userId,
+            isActive,
+            targetUserId: userId // Include target user ID for clarity
+          },
         });
       } catch (activityError) {
         this.logger.error('Failed to create activity log:', activityError);

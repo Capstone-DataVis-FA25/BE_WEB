@@ -9,7 +9,7 @@ export class ActivityCleanupService {
   constructor(private readonly prisma: PrismaService) {}
 
   // Run every day at 02:30 AM server time
-  @Cron(CronExpression.EVERY_DAY_AT_2_30AM)
+  @Cron(CronExpression.EVERY_1ST_DAY_OF_MONTH_AT_NOON)
   async purgeOldLogs(): Promise<void> {
     // 30 days ago
     const threshold = new Date(Date.now() - 30 * 24 * 60 * 60 * 1000);

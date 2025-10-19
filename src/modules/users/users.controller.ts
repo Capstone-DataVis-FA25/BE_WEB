@@ -97,8 +97,9 @@ export class UsersController {
 	@ApiResponse({ status: 200, description: 'User lock/unlock status updated successfully' })
 	lockUnlockUser(
 		@Param('id') id: string,
-		@Body() lockUnlockUserDto: LockUnlockUserDto
+		@Body() lockUnlockUserDto: LockUnlockUserDto,
+		@Request() req: AuthRequest  // Add request parameter to get admin user ID
 	) {
-		return this.usersService.lockUnlockUser(id, lockUnlockUserDto.isActive);
+		return this.usersService.lockUnlockUser(id, lockUnlockUserDto.isActive, req.user.userId);
 	}
 }
