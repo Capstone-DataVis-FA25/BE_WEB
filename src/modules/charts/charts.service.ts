@@ -108,9 +108,10 @@ export class ChartsService {
       }
 
       // Enhance chart response with resolved axis names
-      const enhancedChart = this.enhanceChartWithAxisNames(chart);
+      // TODO: CHECK AND FIX RESPONSE ID
+      // const enhancedChart = this.enhanceChartWithAxisNames(chart);
 
-      return enhancedChart;
+      return chart;
     } catch (error) {
       if (
         error instanceof NotFoundException ||

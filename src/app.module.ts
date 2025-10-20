@@ -5,7 +5,7 @@ import { AppController } from "./app.controller";
 import { AppService } from "./app.service";
 import { database_config } from "./configs/configuration.config";
 
-import { APP_FILTER } from "@nestjs/core";
+import { APP_FILTER, APP_INTERCEPTOR } from "@nestjs/core";
 import { GlobalExceptionFilter } from "./exception-filters/global-exception.filter";
 
 import { AuthModule } from "@modules/auth/auth.module";
@@ -15,7 +15,11 @@ import { EmailModule } from "@modules/email/email.module";
 import { DatasetsModule } from "@modules/datasets/datasets.module";
 import { KmsModule } from "@modules/kms/kms.module";
 import { ChartsModule } from "@modules/charts/charts.module";
+import { AiModule } from "@modules/ai/ai.module";
 import { ChartNotesModule } from "@modules/chart-notes/chart-notes.module";
+import { SystemModule } from "@modules/system/system.module";
+import { ActivityModule } from "@modules/activity/activity.module";
+import { ActivityAuditInterceptor } from "./interceptors/activity-audit.interceptor";
 
 @Module({
   imports: [
@@ -28,6 +32,11 @@ import { ChartNotesModule } from "@modules/chart-notes/chart-notes.module";
         DATABASE_URL: Joi.string().required(),
         JWT_ACCESS_TOKEN_EXPIRATION_TIME: Joi.number().required(),
         JWT_REFRESH_TOKEN_EXPIRATION_TIME: Joi.number().required(),
+        // AI Cleaner (optional, service will throw if key missing when used)
+  OPENROUTER_API_KEY: Joi.string().optional(),
+  OPENAI_API_KEY: Joi.string().optional(),
+  OPENAI_BASE_URL: Joi.string().uri().optional(),
+  OPENAI_MODEL: Joi.string().optional(),
       }),
       validationOptions: {
         abortEarly: false,
@@ -45,7 +54,10 @@ import { ChartNotesModule } from "@modules/chart-notes/chart-notes.module";
     DatasetsModule,
     KmsModule,
     ChartsModule,
+    AiModule,
     ChartNotesModule,
+    SystemModule,
+    ActivityModule,
   ],
   controllers: [AppController],
   providers: [
@@ -53,6 +65,10 @@ import { ChartNotesModule } from "@modules/chart-notes/chart-notes.module";
     {
       provide: APP_FILTER,
       useClass: GlobalExceptionFilter,
+    },
+    {
+      provide: APP_INTERCEPTOR,
+      useClass: ActivityAuditInterceptor,
     },
   ],
 })
