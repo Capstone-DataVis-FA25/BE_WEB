@@ -12,7 +12,12 @@ export class ActivityConsumer implements OnModuleInit, OnModuleDestroy {
   private consumerName = `consumer-${process.pid}`;
 
   constructor(private gateway: ActivityGateway) {
-    this.redis = new Redis(process.env.REDIS_URL);
+    this.redis = new Redis(process.env.REDIS_URL, {
+      retryStrategy: (times) => (times >= 3 ? null : Math.min(times * 200, 1000)),
+      maxRetriesPerRequest: 1,
+      reconnectOnError: () => false,
+      enableOfflineQueue: false,
+    });
   }
 
   async onModuleInit() {
@@ -29,6 +34,13 @@ export class ActivityConsumer implements OnModuleInit, OnModuleDestroy {
   async loop() {
     while (this.running) {
       try {
+        // Check if Redis is connected before attempting to read
+        if (this.redis.status !== 'ready') {
+          this.logger.warn('Redis not ready, skipping read attempt');
+          await new Promise(r => setTimeout(r, 5000)); // Wait 5s before retry
+          continue;
+        }
+
         // BLOCK 2000ms if no message
         const res = await this.redis.xreadgroup(
           'GROUP', this.groupName, this.consumerName,
@@ -63,8 +75,14 @@ export class ActivityConsumer implements OnModuleInit, OnModuleDestroy {
           }
         }
       } catch (err) {
+        // Check if it's a connection error and stop trying
+        if (err.message?.includes('Connection is closed') || err.message?.includes('ECONNREFUSED')) {
+          this.logger.error('Redis connection lost, stopping consumer loop');
+          this.running = false;
+          break;
+        }
         this.logger.error(err);
-        await new Promise(r => setTimeout(r, 1000)); // backoff
+        await new Promise(r => setTimeout(r, 5000)); // Longer backoff for other errors
       }
     }
   }

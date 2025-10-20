@@ -6,10 +6,10 @@ import { PrismaService } from "src/prisma/prisma.service";
 export class ActivityCleanupService {
   private readonly logger = new Logger(ActivityCleanupService.name);
 
-  constructor(private readonly prisma: PrismaService) {}
+  constructor(private readonly prisma: PrismaService) { }
 
   // Run every day at 02:30 AM server time
-  @Cron(CronExpression.EVERY_DAY_AT_2_30AM)
+  @Cron(CronExpression.EVERY_DAY_AT_2AM)
   async purgeOldLogs(): Promise<void> {
     // 30 days ago
     const threshold = new Date(Date.now() - 30 * 24 * 60 * 60 * 1000);

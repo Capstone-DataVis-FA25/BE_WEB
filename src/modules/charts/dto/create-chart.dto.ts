@@ -11,6 +11,7 @@ import {
   IsBoolean,
   Min,
   Max,
+  IsObject,
 } from "class-validator";
 import { Type } from "class-transformer";
 
@@ -1106,22 +1107,20 @@ export class FormattersDto {
   customXFormatter?: string;
 }
 
-// Nested config structure DTO
+// Nested config structure DTO - simplified to accept any object structure
 export class NestedChartConfigDto {
-  @ApiProperty({ description: "Chart configuration", type: ChartConfigDto })
-  @ValidateNested()
-  @Type(() => ChartConfigDto)
-  config: ChartConfigDto;
+  @ApiProperty({ description: "Chart configuration", type: Object })
+  @IsObject()
+  config: any;
 
-  @ApiProperty({ description: "Chart formatters", type: FormattersDto })
-  @ValidateNested()
-  @Type(() => FormattersDto)
-  formatters: FormattersDto;
+  @ApiProperty({ description: "Chart formatters", type: Object })
+  @IsObject()
+  formatters: any;
 
-  @ApiPropertyOptional({ description: "Series configurations", default: [] })
+  @ApiPropertyOptional({ description: "Axis configurations", type: Object })
   @IsOptional()
-  @IsArray()
-  seriesConfigs?: any[];
+  @IsObject()
+  axisConfigs?: any;
 }
 
 export class CreateChartDto {

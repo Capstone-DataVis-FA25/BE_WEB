@@ -8,7 +8,16 @@ export class ActivityService {
   private readonly redis: Redis;
 
   constructor(private prisma: PrismaService) {
-    this.redis = new Redis(process.env.REDIS_URL);
+    this.redis = new Redis(process.env.REDIS_URL, {
+      // Stop retrying after 3 attempts; backoff up to 1s between tries
+      retryStrategy: (times) => (times >= 3 ? null : Math.min(times * 200, 1000)),
+      // Limit per-command retries to avoid long hangs
+      maxRetriesPerRequest: 1,
+      // Do not attempt to reconnect on protocol errors
+      reconnectOnError: () => false,
+      // Prevent queuing commands when disconnected
+      enableOfflineQueue: false,
+    });
   }
 
   async createLog(payload: {
