@@ -20,6 +20,7 @@ import { ChartNotesModule } from "@modules/chart-notes/chart-notes.module";
 import { SystemModule } from "@modules/system/system.module";
 import { ActivityModule } from "@modules/activity/activity.module";
 import { ActivityAuditInterceptor } from "./interceptors/activity-audit.interceptor";
+import { SubscriptionPlansModule } from "@modules/subscription-plans/subscription-plans.module";
 
 @Module({
   imports: [
@@ -58,6 +59,7 @@ import { ActivityAuditInterceptor } from "./interceptors/activity-audit.intercep
     ChartNotesModule,
     SystemModule,
     ActivityModule,
+    SubscriptionPlansModule,
   ],
   controllers: [AppController],
   providers: [
@@ -72,4 +74,4 @@ import { ActivityAuditInterceptor } from "./interceptors/activity-audit.intercep
     },
   ],
 })
-export class AppModule {}
+export class AppModule { }
