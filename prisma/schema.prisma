@@ -67,16 +67,18 @@ model Dataset {
 }
 
 model User {
-  id                        String      @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
-  email                     String      @unique
+  id                        String           @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  email                     String           @unique
   password                  String?
   firstName                 String?
   lastName                  String?
-  role                      UserRole    @default(USER)
-  isActive                  Boolean     @default(true)
-  isVerified                Boolean     @default(false)
-  createdAt                 DateTime    @default(now())
-  updatedAt                 DateTime    @updatedAt
+  role                      UserRole         @default(USER)
+  isActive                  Boolean          @default(true)
+  isVerified                Boolean          @default(false)
+  subscriptionPlanId        String?          @db.Uuid
+  subscriptionPlan          SubscriptionPlan? @relation(fields: [subscriptionPlanId], references: [id])
+  createdAt                 DateTime         @default(now())
+  updatedAt                 DateTime         @updatedAt
   currentHashedRefreshToken String?
   currentVerifyToken        String?
   charts                    Chart[]
@@ -100,4 +102,21 @@ model ActivityLog {
 
   @@index([createdAt])
   @@index([actorId])
+}
+
+model SubscriptionPlan {
+  id          String     @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  name        String     @unique
+  description String?
+  price       Float
+  currency    String     @default("USD")
+  interval    String     @default("month") // month, year, etc.
+  features    String[]   // List of features included in this plan
+  limits      Json?      // Usage limits (e.g., max datasets, max charts, etc.)
+  isActive    Boolean    @default(true)
+  sortOrder   Int        @default(0)
+  createdAt   DateTime   @default(now())
+  updatedAt   DateTime   @updatedAt
+  stripePriceId String?   // For integration with Stripe (optional)
+  users       User[]
 }
