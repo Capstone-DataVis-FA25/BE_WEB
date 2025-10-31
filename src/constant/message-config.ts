@@ -21,4 +21,8 @@ export const Messages = {
   TOKEN_EXPIRED: "Token has expired",
   TOKEN_ALREADY_USED: "Token is invalid or already used",
   CHART_UPDATE_SUCCESS: "chart_update_success_message",
+  // Subscription plan messages
+  SUBSCRIPTION_PLAN_CREATE_SUCCESS: "Subscription plan created successfully",
+  SUBSCRIPTION_PLAN_UPDATE_SUCCESS: "Subscription plan updated successfully",
+  SUBSCRIPTION_PLAN_DELETE_SUCCESS: "Subscription plan deleted successfully",
 };
