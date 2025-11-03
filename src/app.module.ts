@@ -17,6 +17,7 @@ import { KmsModule } from "@modules/kms/kms.module";
 import { ChartsModule } from "@modules/charts/charts.module";
 import { AiModule } from "@modules/ai/ai.module";
 import { ChartNotesModule } from "@modules/chart-notes/chart-notes.module";
+import { ChartHistoryModule } from "@modules/chart-history/chart-history.module";
 import { SystemModule } from "@modules/system/system.module";
 import { ActivityModule } from "@modules/activity/activity.module";
 import { ActivityAuditInterceptor } from "./interceptors/activity-audit.interceptor";
@@ -57,6 +58,7 @@ import { SubscriptionPlansModule } from "@modules/subscription-plans/subscriptio
     ChartsModule,
     AiModule,
     ChartNotesModule,
+    ChartHistoryModule,
     SystemModule,
     ActivityModule,
     SubscriptionPlansModule,

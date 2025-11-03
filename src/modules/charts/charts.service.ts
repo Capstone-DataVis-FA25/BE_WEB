@@ -5,6 +5,8 @@ import {
   BadRequestException,
   HttpException,
   HttpStatus,
+  Inject,
+  forwardRef,
 } from "@nestjs/common";
 import { PrismaService } from "../../prisma/prisma.service";
 import { CreateChartDto } from "./dto/create-chart.dto";
@@ -12,12 +14,16 @@ import { UpdateChartDto } from "./dto/update-chart.dto";
 import { DatasetsService } from "@modules/datasets/datasets.service";
 import { parseChartSpecificConfig } from "./helpers/chart-config.helper";
 import { Messages } from "src/constant/message-config";
+import { ChartHistoryService } from "@modules/chart-history/chart-history.service";
+import * as moment from 'moment-timezone';
 
 @Injectable()
 export class ChartsService {
   constructor(
     private readonly prismaService: PrismaService,
-    private readonly datasetService: DatasetsService
+    private readonly datasetService: DatasetsService,
+    @Inject(forwardRef(() => ChartHistoryService))
+    private readonly chartHistoryService: ChartHistoryService,
   ) {}
 
   async findAll(userId: string) {
@@ -175,6 +181,15 @@ export class ChartsService {
           );
         }
       }
+
+      const createdAt = new Date();
+
+      // Tạo snapshot lịch sử trước khi update
+      await this.chartHistoryService.createHistorySnapshot(
+        id,
+        userId,
+        `Restore before update: ${moment(createdAt).format('HH:mm:ss - DD.MM.YYYY')}`,
+      );
 
       console.log('Updating chart with config:', updateChartDto.config);
       // Frontend sends complete config, no need for backend defaults
