@@ -3,11 +3,11 @@ import {
   NotFoundException,
   ForbiddenException,
   BadRequestException,
-} from '@nestjs/common';
-import { PrismaService } from '../../prisma/prisma.service';
+} from "@nestjs/common";
+import { PrismaService } from "../../prisma/prisma.service";
 
-import * as moment from 'moment-timezone';
-import { ChartHistoryResponseDto } from './dto';
+import * as moment from "moment-timezone";
+import { ChartHistoryResponseDto } from "./dto";
 
 @Injectable()
 export class ChartHistoryService {
@@ -20,7 +20,7 @@ export class ChartHistoryService {
   async createHistorySnapshot(
     chartId: string,
     userId: string,
-    changeNote?: string,
+    changeNote?: string
   ): Promise<ChartHistoryResponseDto> {
     try {
       // Lấy thông tin chart hiện tại
@@ -29,11 +29,11 @@ export class ChartHistoryService {
       });
 
       if (!currentChart) {
-        throw new NotFoundException('Chart not found');
+        throw new NotFoundException("Chart not found");
       }
 
       if (currentChart.userId !== userId) {
-        throw new ForbiddenException('You do not have access to this chart');
+        throw new ForbiddenException("You do not have access to this chart");
       }
 
       const createdAt = currentChart.createdAt;
@@ -50,7 +50,7 @@ export class ChartHistoryService {
             updatedBy: userId,
             changeNote: changeNote,
           },
-        },
+        }
       );
 
       return historyRecord;
@@ -62,7 +62,7 @@ export class ChartHistoryService {
         throw error;
       }
       throw new BadRequestException(
-        `Failed to create history snapshot: ${error.message}`,
+        `Failed to create history snapshot: ${error.message}`
       );
     }
   }
@@ -72,7 +72,7 @@ export class ChartHistoryService {
    */
   async getChartHistory(
     chartId: string,
-    userId: string,
+    userId: string
   ): Promise<ChartHistoryResponseDto[]> {
     try {
       // Kiểm tra quyền truy cập chart
@@ -81,29 +81,19 @@ export class ChartHistoryService {
       });
 
       if (!chart) {
-        throw new NotFoundException('Chart not found');
+        throw new NotFoundException("Chart not found");
       }
 
       if (chart.userId !== userId) {
-        throw new ForbiddenException('You do not have access to this chart');
+        throw new ForbiddenException("You do not have access to this chart");
       }
 
       const history = await this.prismaService.prisma.chartHistory.findMany({
         where: { chartId },
-        orderBy: { createdAt: 'desc' },
-        include: {
-          user: {
-            select: {
-              id: true,
-              email: true,
-              firstName: true,
-              lastName: true,
-            },
-          },
-        },
+        orderBy: { createdAt: "desc" },
       });
 
-      console.log('history: ', history);
+      console.log("history: ", history);
 
       return history;
     } catch (error) {
@@ -114,7 +104,7 @@ export class ChartHistoryService {
         throw error;
       }
       throw new BadRequestException(
-        `Failed to fetch chart history: ${error.message}`,
+        `Failed to fetch chart history: ${error.message}`
       );
     }
   }
@@ -124,7 +114,7 @@ export class ChartHistoryService {
    */
   async getHistoryById(
     historyId: string,
-    userId: string,
+    userId: string
   ): Promise<ChartHistoryResponseDto> {
     try {
       const historyRecord =
@@ -136,12 +126,12 @@ export class ChartHistoryService {
         });
 
       if (!historyRecord) {
-        throw new NotFoundException('History record not found');
+        throw new NotFoundException("History record not found");
       }
 
       if (historyRecord.chart.userId !== userId) {
         throw new ForbiddenException(
-          'You do not have access to this history record',
+          "You do not have access to this history record"
         );
       }
 
@@ -154,7 +144,7 @@ export class ChartHistoryService {
         throw error;
       }
       throw new BadRequestException(
-        `Failed to fetch history record: ${error.message}`,
+        `Failed to fetch history record: ${error.message}`
       );
     }
   }
@@ -166,7 +156,7 @@ export class ChartHistoryService {
     chartId: string,
     historyId: string,
     userId: string,
-    changeNote?: string,
+    changeNote?: string
   ) {
     try {
       // Lấy bản snapshot từ lịch sử
@@ -174,16 +164,12 @@ export class ChartHistoryService {
 
       if (historyRecord.chartId !== chartId) {
         throw new BadRequestException(
-          'History record does not belong to this chart',
+          "History record does not belong to this chart"
         );
       }
 
       // Lưu trạng thái hiện tại vào lịch sử trước khi restore
-      await this.createHistorySnapshot(
-        chartId,
-        userId,
-        changeNote,
-      );
+      await this.createHistorySnapshot(chartId, userId, changeNote);
 
       // Khôi phục chart về config cũ
       const restoredChart = await this.prismaService.prisma.chart.update({
@@ -198,7 +184,7 @@ export class ChartHistoryService {
           dataset: {
             include: {
               headers: {
-                orderBy: { index: 'asc' },
+                orderBy: { index: "asc" },
               },
             },
           },
@@ -214,7 +200,7 @@ export class ChartHistoryService {
       });
 
       return {
-        message: 'Chart restored successfully',
+        message: "Chart restored successfully",
         chart: restoredChart,
         restoredFrom: historyRecord.createdAt,
       };
@@ -227,7 +213,7 @@ export class ChartHistoryService {
         throw error;
       }
       throw new BadRequestException(
-        `Failed to restore chart: ${error.message}`,
+        `Failed to restore chart: ${error.message}`
       );
     }
   }
@@ -243,7 +229,7 @@ export class ChartHistoryService {
         where: { id: historyId },
       });
 
-      return { message: 'History record deleted successfully' };
+      return { message: "History record deleted successfully" };
     } catch (error) {
       if (
         error instanceof NotFoundException ||
@@ -252,7 +238,7 @@ export class ChartHistoryService {
         throw error;
       }
       throw new BadRequestException(
-        `Failed to delete history record: ${error.message}`,
+        `Failed to delete history record: ${error.message}`
       );
     }
   }
