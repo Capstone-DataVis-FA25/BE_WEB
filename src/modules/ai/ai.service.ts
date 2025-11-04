@@ -129,17 +129,51 @@ export class AiService {
     const rules: string[] = [
       'You are a strict CSV cleaner. Output must be ONLY valid CSV text, no markdown, no code fences, no explanations.',
       'Keep the header row. Maintain the same columns unless instructed to drop/rename by the provided schema.',
-      'Standardize whitespace, trim cells, and remove empty trailing rows.',
-      'Do not invent data. If a value is invalid and cannot be fixed deterministically, leave it blank.',
+      
+      '## Duplicate Handling:',
+      '- Remove exact duplicate rows (keep only the first occurrence).',
+      '- If a row has identical values in all key columns (if specified), treat as duplicate.',
+      
+      '## Missing & Empty Data:',
+      '- Remove rows that are entirely empty or contain only whitespace.',
+      '- For cells with missing values (empty, "N/A", "NA", "null", "NULL", "-", "?", "#N/A"), leave them as empty string.',
+      '- Do NOT fill missing values with defaults unless explicitly instructed.',
+      
+      '## Whitespace & Formatting:',
+      '- Trim leading/trailing whitespace from all cells.',
+      '- Normalize internal whitespace (replace multiple spaces with single space).',
+      '- Remove zero-width characters (U+200B, U+FEFF, etc.) and special Unicode whitespace.',
+      
+      '## Data Type Validation:',
+      '- For numeric columns: remove currency symbols, units, and non-numeric characters except valid separators. If result is invalid, leave empty.',
+      '- For date columns: attempt to parse and standardize. If unparseable, leave empty.',
+      '- For text columns: remove control characters (U+0000 to U+001F except tabs/newlines), normalize quotes.',
+      
+      '## Outlier Detection (conservative):',
+      '- Flag extreme outliers in numeric columns only if they are clearly data entry errors (e.g., age = 999, negative price when price should be positive).',
+      '- Do NOT remove valid statistical outliers.',
+      
+      '## Consistency:',
+      '- Standardize categorical values (e.g., "yes"/"Yes"/"YES" → "Yes").',
+      '- Fix common typos in known categorical columns if schema example is provided.',
+      '- Ensure Boolean-like columns use consistent values (e.g., "Yes"/"No" or "1"/"0").',
+      
+      'Do not invent data. If a value cannot be deterministically fixed, leave it blank.',
       'Escape commas, quotes, and line breaks according to RFC 4180 as needed.',
     ];
-    if (payload.schemaExample)
-      rules.push('Follow the provided CSV schema example strictly for columns order and sample types.');
+    
+    if (payload.schemaExample) {
+      rules.push('Follow the provided CSV schema example strictly for columns order, data types, and sample values.');
+    }
+    
     if (payload.thousandsSeparator || payload.decimalSeparator) {
       rules.push(`For numeric columns, use thousands separator "${payload.thousandsSeparator ?? ''}" and decimal separator "${payload.decimalSeparator ?? ''}".`);
     }
-    if (payload.dateFormat)
+    
+    if (payload.dateFormat) {
       rules.push(`Format all date-like values to match this date format exactly: ${payload.dateFormat}`);
+    }
+    
     return rules.join('\n');
   }
 
@@ -260,17 +294,49 @@ export class AiService {
 
   private buildMatrixSystemPrompt(opts: { thousandsSeparator?: string; decimalSeparator?: string; dateFormat?: string }): string {
     const rules: string[] = [
-      'You are a strict data cleaner.',
+      'You are a strict data cleaner for tabular data.',
       'Output must be ONLY a valid JSON array of arrays (2D matrix). No markdown, no code fences, no extra text.',
-      'The first inner array must be the header row. Maintain same columns unless clearly invalid per schema example.',
-      'Trim whitespace, normalize values, standardize nulls to empty string, and remove empty trailing rows.',
+      'The first inner array must be the header row.',
+      
+      '## Duplicate Handling:',
+      '- Remove exact duplicate rows (compare all columns, keep first occurrence).',
+      '- The header row does not count as a duplicate.',
+      
+      '## Missing & Empty Data:',
+      '- Remove rows that are entirely empty (all cells are empty string, null, or whitespace).',
+      '- For individual missing cells, use empty string ("").',
+      '- Recognize these as missing: empty, "N/A", "NA", "null", "NULL", "-", "?", "#N/A", "n/a".',
+      
+      '## Whitespace & Formatting:',
+      '- Trim all cell values (leading/trailing whitespace).',
+      '- Collapse multiple internal spaces to single space.',
+      '- Remove zero-width characters (U+200B, U+FEFF, etc.) and control characters.',
+      
+      '## Data Type Validation & Coercion:',
+      '- Numeric columns: remove currency symbols ($, €, £), units (km, kg, %), and non-numeric chars. Keep only valid number format.',
+      '- Date columns: parse flexibly (MM/DD/YYYY, DD-MM-YYYY, ISO, etc.), then output in specified format. Invalid dates → empty string.',
+      '- Text columns: remove control characters (U+0000 to U+001F except tabs/newlines), normalize quotes (curly quotes to straight quotes).',
+      
+      '## Outlier Detection:',
+      '- Only flag obvious data entry errors (e.g., age > 150, age < 0, negative prices when context indicates prices should be positive, dates in year 1800 for modern data).',
+      '- Do NOT remove valid statistical outliers (e.g., high salaries, large transaction amounts).',
+      
+      '## Consistency:',
+      '- Standardize case for categorical values (e.g., "male"/"Male"/"MALE" → "Male").',
+      '- Fix common typos if pattern is clear (e.g., "Treu" → "True", "Flase" → "False").',
+      '- Ensure Boolean-like columns use consistent values (e.g., "Yes"/"No" or "True"/"False" or "1"/"0").',
+      
       'Do not invent data. If a value cannot be deterministically fixed, leave it empty string.',
     ];
+    
     if (opts.thousandsSeparator || opts.decimalSeparator) {
       rules.push(`For numeric cells, format with thousands separator "${opts.thousandsSeparator ?? ''}" and decimal separator "${opts.decimalSeparator ?? ''}".`);
     }
-    if (opts.dateFormat)
+    
+    if (opts.dateFormat) {
       rules.push(`Convert all date-like values to this exact date format: ${opts.dateFormat}.`);
+    }
+    
     rules.push('Ensure the output is valid JSON and nothing else.');
     return rules.join('\n');
   }
