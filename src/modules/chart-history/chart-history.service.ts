@@ -88,11 +88,21 @@ export class ChartHistoryService {
         throw new ForbiddenException('You do not have access to this chart');
       }
 
-      // Lấy 5 lịch sử mới nhất, sắp xếp theo thời gian mới nhất
       const history = await this.prismaService.prisma.chartHistory.findMany({
         where: { chartId },
         orderBy: { createdAt: 'desc' },
+        include: {
+          user: {
+            select: {
+              id: true,
+              email: true,
+              firstName: true,
+              lastName: true,
+            },
+          },
+        },
       });
+
       console.log('history: ', history);
 
       return history;
@@ -243,149 +253,6 @@ export class ChartHistoryService {
       }
       throw new BadRequestException(
         `Failed to delete history record: ${error.message}`,
-      );
-    }
-  }
-
-  /**
-   * So sánh hai phiên bản (current vs history)
-   */
-  async compareVersions(chartId: string, historyId: string, userId: string) {
-    try {
-      // Lấy chart hiện tại
-      const currentChart = await this.prismaService.prisma.chart.findUnique({
-        where: { id: chartId },
-      });
-
-      if (!currentChart) {
-        throw new NotFoundException('Chart not found');
-      }
-
-      if (currentChart.userId !== userId) {
-        throw new ForbiddenException('You do not have access to this chart');
-      }
-
-      // Lấy bản snapshot từ lịch sử
-      const historyRecord = await this.getHistoryById(historyId, userId);
-
-      // So sánh các trường cơ bản
-      const basicDifferences: any = {};
-      
-      if (currentChart.name !== historyRecord.name) {
-        basicDifferences.name = {
-          current: currentChart.name,
-          historical: historyRecord.name,
-        };
-      }
-
-      if (currentChart.description !== historyRecord.description) {
-        basicDifferences.description = {
-          current: currentChart.description,
-          historical: historyRecord.description,
-        };
-      }
-
-      if (currentChart.type !== historyRecord.type) {
-        basicDifferences.type = {
-          current: currentChart.type,
-          historical: historyRecord.type,
-        };
-      }
-
-      return {
-        current: {
-          name: currentChart.name,
-          description: currentChart.description,
-          type: currentChart.type,
-          config: currentChart.config,
-          updatedAt: currentChart.updatedAt,
-        },
-        historical: {
-          name: historyRecord.name,
-          description: historyRecord.description,
-          type: historyRecord.type,
-          config: historyRecord.config,
-          createdAt: historyRecord.createdAt,
-        },
-        differences: {
-          ...basicDifferences,
-          config: this.calculateDifferences(
-            currentChart.config as any,
-            historyRecord.config as any,
-          ),
-        },
-      };
-    } catch (error) {
-      if (
-        error instanceof NotFoundException ||
-        error instanceof ForbiddenException
-      ) {
-        throw error;
-      }
-      throw new BadRequestException(
-        `Failed to compare versions: ${error.message}`,
-      );
-    }
-  }
-
-  /**
-   * Tính toán sự khác biệt giữa hai config
-   */
-  private calculateDifferences(current: any, historical: any): any {
-    const differences: any = {};
-
-    // So sánh các key trong config
-    const allKeys = new Set([
-      ...Object.keys(current?.config || {}),
-      ...Object.keys(historical?.config || {}),
-    ]);
-
-    allKeys.forEach((key) => {
-      const currentValue = current?.config?.[key];
-      const historicalValue = historical?.config?.[key];
-
-      if (JSON.stringify(currentValue) !== JSON.stringify(historicalValue)) {
-        differences[key] = {
-          current: currentValue,
-          historical: historicalValue,
-        };
-      }
-    });
-
-    return differences;
-  }
-
-  /**
-   * Lấy số lượng phiên bản lịch sử của một chart
-   */
-  async getHistoryCount(chartId: string, userId: string): Promise<number> {
-    try {
-      const chart = await this.prismaService.prisma.chart.findUnique({
-        where: { id: chartId },
-      });
-
-      if (!chart) {
-        throw new NotFoundException('Chart not found');
-      }
-
-      if (chart.userId !== userId) {
-        throw new ForbiddenException('You do not have access to this chart');
-      }
-
-      const count = await this.prismaService.prisma.chartHistory.count({
-        where: { chartId },
-      });
-
-      return count;
-    } catch (error) {
-      if (
-        error instanceof NotFoundException ||
-        error instanceof ForbiddenException
-      ) {
-        throw error;
-      }
-      throw new BadRequestException(
-        `Failed to count history records: ${error.message}`,
       );
     }
   }
