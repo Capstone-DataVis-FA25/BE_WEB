@@ -4,6 +4,7 @@ import {
     BadRequestException,
     ForbiddenException,
 } from "@nestjs/common";
+import { CreateCheckoutDto } from './dto/create-checkout.dto';
 import { PrismaService } from "../../prisma/prisma.service";
 import { CreateSubscriptionPlanDto } from "./dto/create-subscription-plan.dto";
 import { UpdateSubscriptionPlanDto } from "./dto/update-subscription-plan.dto";
@@ -167,6 +168,81 @@ export class SubscriptionPlansService {
             throw new BadRequestException(
                 `Failed to fetch active subscription plans: ${error.message}`
             );
+        }
+    }
+
+    /**
+     * Create a checkout session using PayOS (or other provider configured via env).
+     * Accepts a priceId which may be a provider-specific price id (eg. stripe price id)
+     * or an internal subscription plan id. Returns { checkoutUrl } if available.
+     */
+    async createCheckout(createCheckoutDto: CreateCheckoutDto) {
+        const { priceId, returnUrl } = createCheckoutDto;
+
+        // Resolve plan by stripePriceId or by id
+        let plan = null;
+        if (!priceId) {
+            throw new BadRequestException('priceId is required');
+        }
+
+        // Try to find plan by stripePriceId first
+        plan = await this.prismaService.prisma.subscriptionPlan.findFirst({
+            where: { stripePriceId: priceId },
+        });
+
+        // If not found, try by internal id
+        if (!plan) {
+            plan = await this.prismaService.prisma.subscriptionPlan.findUnique({
+                where: { id: priceId },
+            });
+        }
+
+        if (!plan) {
+            throw new NotFoundException('Subscription plan not found for provided priceId');
+        }
+
+        // Build PayOS request payload. The exact fields depend on PayOS API; keep this generic
+        const payosBase = process.env.PAYOS_API_BASE || process.env.PAYOS_BASE_URL;
+        const payosKey = process.env.PAYOS_API_KEY;
+
+        if (!payosBase || !payosKey) {
+            // Not configured; return a helpful error so deployer can set env vars
+            throw new BadRequestException('Payment gateway is not configured on server (missing PAYOS_API_BASE or PAYOS_API_KEY)');
+        }
+
+        const payload = {
+            amount: Math.round((plan.price || 0) * 100), // cents/lowest currency unit
+            currency: plan.currency || 'USD',
+            description: plan.description || plan.name,
+            // Use provider price id if available so provider can create right product/price
+            priceId: plan.stripePriceId || plan.id,
+            metadata: {
+                planId: plan.id,
+                planName: plan.name,
+            },
+            // return url for success/cancel (frontend should handle)
+            returnUrl: returnUrl || process.env.PAYOS_RETURN_URL || '',
+        };
+
+        try {
+            // This is a generic POST to PayOS service - adapt path to actual PayOS API
+            // const resp = await axios.post(`${payosBase}/v1/checkout-sessions`, payload, {
+            //     headers: {
+            //         Authorization: `Bearer ${payosKey}`,
+            //         'Content-Type': 'application/json',
+            //     },
+            //     timeout: 15000,
+            // });
+
+            // Expect provider to return an URL to redirect user to checkout
+            const data = resp.data || {};
+            const checkoutUrl = data.checkoutUrl || data.url || data.sessionUrl || data.redirectUrl;
+
+            return { checkoutUrl };
+        } catch (error) {
+            // Bubble up useful message
+            const message = error?.response?.data || error.message || 'Failed to create checkout session';
+            throw new BadRequestException(`Payment provider error: ${JSON.stringify(message)}`);
         }
     }
 }

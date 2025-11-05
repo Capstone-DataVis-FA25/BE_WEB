@@ -112,4 +112,16 @@ export class SubscriptionPlansController {
     remove(@Param('id') id: string) {
         return this.subscriptionPlansService.remove(id);
     }
+
+    // Public endpoint to create a checkout session (frontend opens returned URL)
+    @Post('checkout')
+    @ApiOperation({
+        summary: 'Create checkout session for a subscription plan',
+        description: 'Creates a checkout session for the provided priceId or plan id and returns a redirect URL',
+    })
+    @ApiResponse({ status: 200, description: 'Checkout session created successfully' })
+    async createCheckout(@Body() body: any) {
+        // Use DTO validation by importing and typing if desired
+        return this.subscriptionPlansService.createCheckout(body);
+    }
 }
