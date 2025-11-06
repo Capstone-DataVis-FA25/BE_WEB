@@ -35,6 +35,15 @@ export class CreateDataHeaderDto {
     @IsArray()
     @ArrayMinSize(1, { message: 'Each column must have at least one data value' })
     data: any[];
+
+    @ApiProperty({
+        description: 'Date format for this column (only used when type = date)',
+        example: 'YYYY-MM-DD',
+        required: false,
+    })
+    @IsOptional()
+    @IsString()
+    dateFormat?: string;
 }
 
 // Custom validator for consistent header data lengths
@@ -127,12 +136,5 @@ export class CreateDatasetDto {
     @IsString()
     decimalSeparator?: string;
 
-    @ApiProperty({
-        description: 'Date format for date parsing',
-        example: 'YYYY-MM-DD',
-        required: false,
-    })
-    @IsOptional()
-    @IsString()
-    dateFormat?: string;
+    // Removed dataset-level dateFormat; date format now belongs to each DataHeader
 }
