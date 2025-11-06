@@ -8,18 +8,19 @@ datasource db {
 }
 
 model Chart {
-  id          String      @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
-  name        String      @unique
-  description String?
-  type        String
-  config      Json
-  createdAt   DateTime    @default(now())
-  updatedAt   DateTime    @updatedAt
-  datasetId   String?     @db.Uuid
-  userId      String      @db.Uuid
-  dataset     Dataset?    @relation(fields: [datasetId], references: [id])
-  user        User        @relation(fields: [userId], references: [id], onDelete: Cascade)
-  chartNotes  ChartNote[]
+  id           String         @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  name         String         @unique
+  description  String?
+  type         String
+  config       Json
+  createdAt    DateTime       @default(now())
+  updatedAt    DateTime       @updatedAt
+  datasetId    String?        @db.Uuid
+  userId       String         @db.Uuid
+  dataset      Dataset?       @relation(fields: [datasetId], references: [id])
+  user         User           @relation(fields: [userId], references: [id], onDelete: Cascade)
+  chartNotes   ChartNote[]
+  chartHistory ChartHistory[]
 }
 
 model ChartNote {
@@ -119,4 +120,20 @@ model SubscriptionPlan {
   updatedAt   DateTime   @updatedAt
   stripePriceId String?   // For integration with Stripe (optional)
   users       User[]
+}
+
+model ChartHistory {
+  id          String   @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  chartId     String   @db.Uuid
+  name        String
+  description String?
+  type        String
+  config      Json     // Lưu config cũ trước khi update
+  createdAt   DateTime @default(now())
+  updatedBy   String   @db.Uuid
+  changeNote  String?  // Ghi chú về thay đổi (optional)
+  chart       Chart    @relation(fields: [chartId], references: [id], onDelete: Cascade)
+
+  @@index([chartId], map: "chart_history_chartId_idx")
+  @@index([createdAt], map: "chart_history_createdAt_idx")
 }
