@@ -12,10 +12,9 @@ import { PrismaService } from "../../prisma/prisma.service";
 import { CreateChartDto } from "./dto/create-chart.dto";
 import { UpdateChartDto } from "./dto/update-chart.dto";
 import { DatasetsService } from "@modules/datasets/datasets.service";
-import { parseChartSpecificConfig } from "./helpers/chart-config.helper";
 import { Messages } from "src/constant/message-config";
 import { ChartHistoryService } from "@modules/chart-history/chart-history.service";
-import * as moment from 'moment-timezone';
+import * as moment from "moment-timezone";
 
 @Injectable()
 export class ChartsService {
@@ -23,7 +22,7 @@ export class ChartsService {
     private readonly prismaService: PrismaService,
     private readonly datasetService: DatasetsService,
     @Inject(forwardRef(() => ChartHistoryService))
-    private readonly chartHistoryService: ChartHistoryService,
+    private readonly chartHistoryService: ChartHistoryService
   ) {}
 
   async findAll(userId: string) {
@@ -140,7 +139,7 @@ export class ChartsService {
           name,
           description: description || null,
           type,
-          config: config
+          config: config,
         },
       });
     } catch (error) {
@@ -188,10 +187,10 @@ export class ChartsService {
       await this.chartHistoryService.createHistorySnapshot(
         id,
         userId,
-        `Restore before update: ${moment(createdAt).format('HH:mm:ss - DD.MM.YYYY')}`,
+        `Restore before update: ${moment(createdAt).format("HH:mm:ss - DD.MM.YYYY")}`
       );
 
-      console.log('Updating chart with config:', updateChartDto.config);
+      console.log("Updating chart with config:", updateChartDto.config);
       // Frontend sends complete config, no need for backend defaults
       const updatedChart = await this.prismaService.prisma.chart.update({
         where: { id },
@@ -214,7 +213,7 @@ export class ChartsService {
           },
         },
       });
-      return {updatedChart, message: Messages.CHART_UPDATE_SUCCESS};
+      return { updatedChart, message: Messages.CHART_UPDATE_SUCCESS };
     } catch (error) {
       if (
         error instanceof NotFoundException ||
@@ -222,7 +221,7 @@ export class ChartsService {
       ) {
         throw error;
       }
-      console.log('Console.log Hello world: ', error);
+      console.log("Console.log Hello world: ", error);
       throw new BadRequestException(`Failed to update chart: ${error.message}`);
     }
   }
