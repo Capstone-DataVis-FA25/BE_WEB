@@ -55,36 +55,6 @@ export class ChartHistoryController {
     return this.chartHistoryService.getChartHistory(chartId, req.user.userId);
   }
 
-  @Get('chart/:chartId/count')
-  @ApiOperation({
-    summary: 'Get count of history versions',
-    description:
-      'Get the total number of history versions for a specific chart.',
-  })
-  @ApiResponse({
-    status: 200,
-    description: 'History count retrieved successfully',
-  })
-  @ApiResponse({
-    status: 403,
-    description: 'Forbidden - chart access denied',
-  })
-  @ApiResponse({ status: 404, description: 'Chart not found' })
-  @ApiParam({
-    name: 'chartId',
-    description: 'ID of the chart to count history for',
-  })
-  async getHistoryCount(
-    @Param('chartId') chartId: string,
-    @Request() req: AuthRequest,
-  ) {
-    const count = await this.chartHistoryService.getHistoryCount(
-      chartId,
-      req.user.userId,
-    );
-    return { count };
-  }
-
   @Get(':historyId')
   @ApiOperation({
     summary: 'Get a specific history version',
@@ -146,41 +116,6 @@ export class ChartHistoryController {
       restoreDto.historyId,
       req.user.userId,
       restoreDto.changeNote,
-    );
-  }
-
-  @Get('chart/:chartId/compare/:historyId')
-  @ApiOperation({
-    summary: 'Compare current version with a historical version',
-    description:
-      'Compare the current chart configuration with a specific historical version to see what changed.',
-  })
-  @ApiResponse({
-    status: 200,
-    description: 'Version comparison retrieved successfully',
-  })
-  @ApiResponse({
-    status: 403,
-    description: 'Forbidden - chart access denied',
-  })
-  @ApiResponse({ status: 404, description: 'Chart or history record not found' })
-  @ApiParam({
-    name: 'chartId',
-    description: 'ID of the chart to compare',
-  })
-  @ApiParam({
-    name: 'historyId',
-    description: 'ID of the history record to compare with',
-  })
-  async compareVersions(
-    @Param('chartId') chartId: string,
-    @Param('historyId') historyId: string,
-    @Request() req: AuthRequest,
-  ) {
-    return this.chartHistoryService.compareVersions(
-      chartId,
-      historyId,
-      req.user.userId,
     );
   }
 

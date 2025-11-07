@@ -1183,12 +1183,11 @@ export class CreateChartDto {
   @Type(() => NestedChartConfigDto)
   config: NestedChartConfigDto;
 
-  @ApiProperty({
+  @ApiPropertyOptional({
     description: "ID of the dataset this chart belongs to",
     example: "clx1234567890abcdef",
-    required: true,
   })
+  @IsOptional()
   @IsString()
-  @IsNotEmpty({ message: "Dataset ID is required" })
-  datasetId: string;
+  datasetId?: string;
 }
