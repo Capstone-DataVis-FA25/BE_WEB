@@ -1,11 +1,17 @@
 import { Injectable, NotFoundException, BadRequestException, Logger } from '@nestjs/common';
 import { PrismaService } from '../../prisma/prisma.service';
+import { PayOSService } from './payos.service';
+import { ConfigService } from '@nestjs/config';
 import { v4 as uuidv4 } from 'uuid';
 
 @Injectable()
 export class PaymentsService {
     private readonly logger = new Logger(PaymentsService.name);
-    constructor(private readonly prismaService: PrismaService) { }
+    constructor(
+        private readonly prismaService: PrismaService,
+        private readonly payosService: PayOSService,
+        private readonly configService: ConfigService,
+    ) { }
 
     async createCheckout(userId: string, planId: string, returnUrl?: string) {
         const plan = await this.prismaService.prisma.subscriptionPlan.findUnique({ where: { id: planId } });
@@ -21,21 +27,39 @@ export class PaymentsService {
                 subscriptionPlanId: planId,
                 amount: plan.price,
                 currency: plan.currency || 'USD',
-                provider: process.env.PAYMENT_PROVIDER || 'payos',
+                provider: 'payos',
                 providerTransactionId: providerTxId,
                 metadata: { returnUrl: returnUrl || null },
             },
         });
 
-        // TODO: Replace this stub with a real PayOS API call to create a checkout/session
-        // For now return a checkout URL that includes the providerTransactionId so front-end can redirect.
-        const checkoutUrlBase = process.env.PAYOS_CHECKOUT_URL || 'https://payos.example/checkout';
-        const checkoutUrl = `${checkoutUrlBase}?tx=${encodeURIComponent(providerTxId)}&amount=${encodeURIComponent(String(plan.price))}`;
+        // Create PayOS payment link
+        // Use providerTxId as orderCode (PayOS requires a number, so we can use a timestamp or hash, here we use Date.now())
+        const orderCode = Date.now();
+        const cancelUrl = this.configService.get<string>('FRONTEND_URL') || 'http://localhost:5173';
+        const payosCheckoutUrl = await this.payosService.createPaymentLink({
+            orderCode,
+            amount: plan.price,
+            description: `Thanh toán gói ${plan.name}`,
+            cancelUrl,
+            returnUrl: returnUrl || cancelUrl,
+        });
 
-        this.logger.debug(`Created pending payment tx ${tx.id} for plan ${planId}`);
+        // Ensure metadata is an object before spreading to avoid TS error when metadata can be non-object (e.g. null)
+        await this.prismaService.prisma.paymentTransaction.update({
+            where: { id: tx.id },
+            data: {
+                metadata: {
+                    ...((tx.metadata && typeof tx.metadata === 'object' && !Array.isArray(tx.metadata)) ? tx.metadata as Record<string, any> : {}),
+                    orderCode,
+                },
+            },
+        });
+
+        this.logger.debug(`Created PayOS payment tx ${tx.id} for plan ${planId}`);
 
         return {
-            checkoutUrl,
+            checkoutUrl: payosCheckoutUrl,
             transactionId: tx.id,
         };
     }
@@ -65,14 +89,16 @@ export class PaymentsService {
             where: { id: tx.id },
             data: {
                 status: normalizedStatus as any,
-                metadata: { ...(tx.metadata || {}), ...(metadata || {}) },
+                metadata: Object.assign(
+                    {},
+                    (typeof tx.metadata === 'object' && tx.metadata !== null) ? tx.metadata : {},
+                    (typeof metadata === 'object' && metadata !== null) ? metadata : {},
+                ),
             },
         });
 
         // If completed, assign subscription to user
         if (normalizedStatus === 'COMPLETED' && tx.userId && tx.subscriptionPlanId) {
-            // Note: This sets the user's `subscriptionPlanId` to the new plan.
-            // For a complete system you may want to create a Subscription table with start/end dates.
             await this.prismaService.prisma.user.update({
                 where: { id: tx.userId },
                 data: { subscriptionPlanId: tx.subscriptionPlanId },

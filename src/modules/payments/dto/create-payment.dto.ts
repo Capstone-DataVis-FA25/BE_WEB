@@ -7,5 +7,5 @@ export class CreatePaymentDto {
 
     @IsOptional()
     @IsString()
-    returnUrl?: string; // where PayOS should redirect after payment
+    returnUrl?: string;
 }

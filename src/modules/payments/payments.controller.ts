@@ -36,13 +36,10 @@ export class PaymentsController {
     @ApiBearerAuth()
     @ApiOperation({ summary: 'Get payment transaction by id (user or admin)' })
     async getTransaction(@Request() req: any, @Param('id') id: string) {
-        // For simplicity we allow user to fetch their own tx; admin role checks can be added
         const tx = await this.paymentsService.getTransaction(id);
         return tx;
     }
 
-    // Webhook endpoint for PayOS to notify about payment updates
-    // NOTE: In production you MUST verify signatures and secure this endpoint
     @Post('webhook')
     @HttpCode(200)
     @ApiOperation({ summary: 'Webhook endpoint for payment provider callbacks' })
