@@ -36,22 +36,19 @@ export class ChartHistoryService {
         throw new ForbiddenException("You do not have access to this chart");
       }
 
-      const createdAt = currentChart.createdAt;
-
       // Tạo bản snapshot trong lịch sử
-      const historyRecord = await this.prismaService.prisma.chartHistory.create(
-        {
-          data: {
-            chartId: currentChart.id,
-            name: currentChart.name,
-            description: currentChart.description,
-            type: currentChart.type,
-            config: currentChart.config,
-            updatedBy: userId,
-            changeNote: changeNote,
-          },
-        }
-      );
+      const historyRecord = await this.prismaService.prisma.chartHistory.create({
+        data: {
+          chartId: currentChart.id,
+          datasetId: currentChart.datasetId, // thêm datasetId
+          name: currentChart.name,
+          description: currentChart.description,
+          type: currentChart.type,
+          config: currentChart.config,
+          updatedBy: userId,
+          changeNote: changeNote,
+        },
+      });
 
       return historyRecord;
     } catch (error) {
@@ -179,6 +176,7 @@ export class ChartHistoryService {
           description: historyRecord.description,
           type: historyRecord.type,
           config: historyRecord.config,
+          datasetId: historyRecord.datasetId, // restore datasetId
         },
         include: {
           dataset: {

@@ -65,6 +65,7 @@ model Dataset {
   charts             Chart[]
   headers            DataHeader[]
   user               User         @relation(fields: [userId], references: [id], onDelete: Cascade)
+  chartHistory       ChartHistory[]
 }
 
 model User {
@@ -85,6 +86,7 @@ model User {
   charts                    Chart[]
   chartNotes                ChartNote[]
   datasets                  Dataset[]
+  chartHistory              ChartHistory[]
 }
 
 enum UserRole {
@@ -125,6 +127,7 @@ model SubscriptionPlan {
 model ChartHistory {
   id          String   @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
   chartId     String   @db.Uuid
+  datasetId   String   @db.Uuid
   name        String
   description String?
   type        String
@@ -133,6 +136,8 @@ model ChartHistory {
   updatedBy   String   @db.Uuid
   changeNote  String?  // Ghi chú về thay đổi (optional)
   chart       Chart    @relation(fields: [chartId], references: [id], onDelete: Cascade)
+  dataset     Dataset  @relation(fields: [datasetId], references: [id], onDelete: Cascade)
+  user        User     @relation(fields: [updatedBy], references: [id])
 
   @@index([chartId], map: "chart_history_chartId_idx")
   @@index([createdAt], map: "chart_history_createdAt_idx")

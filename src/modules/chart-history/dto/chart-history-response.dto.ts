@@ -14,6 +14,12 @@ export class ChartHistoryResponseDto {
   chartId: string;
 
   @ApiProperty({
+    description: 'ID of the dataset this chart uses',
+    example: 'clx1234567890abcdef',
+  })
+  datasetId: string;
+
+  @ApiProperty({
     description: 'Name of the chart at the time of this snapshot',
     example: 'Sales Chart - Version 1',
   })
