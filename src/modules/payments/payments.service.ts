@@ -20,7 +20,7 @@ export class PaymentsService {
         }
 
         // Create a PENDING transaction in DB
-        const providerTxId = uuidv4();
+        const orderCode = Date.now() + parseInt(uuidv4().slice(-5), 16);
         const tx = await this.prismaService.prisma.paymentTransaction.create({
             data: {
                 userId: userId || undefined,
@@ -28,14 +28,13 @@ export class PaymentsService {
                 amount: plan.price,
                 currency: plan.currency || 'USD',
                 provider: 'payos',
-                providerTransactionId: providerTxId,
+                providerTransactionId: orderCode.toString(),
                 metadata: { returnUrl: returnUrl || null },
             },
         });
 
         // Create PayOS payment link
         // Use providerTxId as orderCode (PayOS requires a number, so we can use a timestamp or hash, here we use Date.now())
-        const orderCode = Date.now();
         const cancelUrl = this.configService.get<string>('FRONTEND_URL') || 'http://localhost:5173';
         const payosCheckoutUrl = await this.payosService.createPaymentLink({
             orderCode,

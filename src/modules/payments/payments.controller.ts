@@ -44,7 +44,7 @@ export class PaymentsController {
     @HttpCode(200)
     @ApiOperation({ summary: 'Webhook endpoint for payment provider callbacks' })
     async webhook(@Body() body: PaymentsWebhookDto) {
-        this.logger.debug('Received payment webhook');
+        this.logger.debug('Received payment webhook: ', body);
         const { providerTransactionId, status, metadata } = body as any;
         return this.paymentsService.handleProviderWebhook(providerTransactionId, status, metadata);
     }
