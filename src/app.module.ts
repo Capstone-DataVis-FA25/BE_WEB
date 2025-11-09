@@ -22,6 +22,7 @@ import { SystemModule } from "@modules/system/system.module";
 import { ActivityModule } from "@modules/activity/activity.module";
 import { ActivityAuditInterceptor } from "./interceptors/activity-audit.interceptor";
 import { SubscriptionPlansModule } from "@modules/subscription-plans/subscription-plans.module";
+import { PaymentsModule } from "@modules/payments/payments.module";
 
 @Module({
   imports: [
@@ -35,10 +36,10 @@ import { SubscriptionPlansModule } from "@modules/subscription-plans/subscriptio
         JWT_ACCESS_TOKEN_EXPIRATION_TIME: Joi.number().required(),
         JWT_REFRESH_TOKEN_EXPIRATION_TIME: Joi.number().required(),
         // AI Cleaner (optional, service will throw if key missing when used)
-  OPENROUTER_API_KEY: Joi.string().optional(),
-  OPENAI_API_KEY: Joi.string().optional(),
-  OPENAI_BASE_URL: Joi.string().uri().optional(),
-  OPENAI_MODEL: Joi.string().optional(),
+        OPENROUTER_API_KEY: Joi.string().optional(),
+        OPENAI_API_KEY: Joi.string().optional(),
+        OPENAI_BASE_URL: Joi.string().uri().optional(),
+        OPENAI_MODEL: Joi.string().optional(),
       }),
       validationOptions: {
         abortEarly: false,
@@ -62,6 +63,7 @@ import { SubscriptionPlansModule } from "@modules/subscription-plans/subscriptio
     SystemModule,
     ActivityModule,
     SubscriptionPlansModule,
+    PaymentsModule
   ],
   controllers: [AppController],
   providers: [
