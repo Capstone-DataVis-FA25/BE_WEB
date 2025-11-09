@@ -1124,69 +1124,30 @@ export class NestedChartConfigDto {
 }
 
 export class CreateChartDto {
-  @ApiProperty({
-    description: "Name for the chart",
-    example: "Sample Line Chart",
-    required: true,
-  })
+  @ApiProperty({ description: 'Name for the chart', example: 'Sample Line Chart', required: true })
   @IsString()
-  @IsNotEmpty({ message: "Chart name is required" })
-  @MaxLength(50, { message: "Chart name must be at most 50 characters long" })
+  @IsNotEmpty({ message: 'Chart name is required' })
+  @MaxLength(50, { message: 'Chart name must be at most 50 characters long' })
   name: string;
 
-  @ApiProperty({
-    description: "Description for the chart",
-    example: "A test line chart",
-    required: false,
-  })
+  @ApiPropertyOptional({ description: 'Description for the chart', example: 'A test line chart' })
   @IsOptional()
   @IsString()
-  @MaxLength(200, {
-    message: "Chart description must be at most 200 characters long",
-  })
+  @MaxLength(200, { message: 'Chart description must be at most 200 characters long' })
   description?: string;
 
-  @ApiProperty({
-    description: "Type of chart",
-    example: "line",
-    required: true,
-    enum: CHART_TYPES,
-  })
+  @ApiProperty({ description: 'Type of chart', example: 'bar', enum: CHART_TYPES })
   @IsString()
-  @IsNotEmpty({ message: "Chart type is required" })
-  @IsIn(CHART_TYPES, { message: "Invalid chart type" })
+  @IsNotEmpty({ message: 'Chart type is required' })
+  @IsIn(CHART_TYPES, { message: 'Invalid chart type' })
   type: ChartType;
 
-  @ApiProperty({
-    description:
-      "Chart configuration with nested structure containing config, formatters and seriesConfigs.",
-    example: {
-      config: {
-        title: "Sample Chart",
-        width: 700,
-        height: 300,
-        margin: { top: 20, left: 50, right: 30, bottom: 40 },
-      },
-      formatters: {
-        useYFormatter: true,
-        useXFormatter: true,
-        yFormatterType: "number",
-        xFormatterType: "number",
-        customYFormatter: "",
-        customXFormatter: "",
-      },
-      seriesConfigs: [],
-    },
-    required: true,
-  })
-  @ValidateNested()
-  @Type(() => NestedChartConfigDto)
-  config: NestedChartConfigDto;
+  // Accept the entire config payload as an arbitrary object (nested validation disabled)
+  @ApiProperty({ description: 'Chart configuration payload (nested object)', type: Object })
+  @IsObject()
+  config: any;
 
-  @ApiPropertyOptional({
-    description: "ID of the dataset this chart belongs to",
-    example: "clx1234567890abcdef",
-  })
+  @ApiPropertyOptional({ description: 'ID of the dataset this chart belongs to', example: 'clx1234567890abcdef' })
   @IsOptional()
   @IsString()
   datasetId?: string;
