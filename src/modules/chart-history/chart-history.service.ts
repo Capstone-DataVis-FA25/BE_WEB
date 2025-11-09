@@ -240,4 +240,16 @@ export class ChartHistoryService {
       );
     }
   }
+
+  /**
+   * Lấy số lượng phiên bản lịch sử của một chart
+  */
+  async getHistoryCount(chartId: string, userId: string): Promise<number> {
+    const chart = await this.prismaService.prisma.chart.findUnique({
+      where: { id: chartId },
+    });
+    if (!chart) throw new NotFoundException('Chart not found');
+    if (chart.userId !== userId) throw new ForbiddenException('You do not have access to this chart');
+    return await this.prismaService.prisma.chartHistory.count({ where: { chartId } });
+  }
 }
