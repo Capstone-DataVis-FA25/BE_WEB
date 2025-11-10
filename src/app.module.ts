@@ -23,6 +23,7 @@ import { ActivityModule } from "@modules/activity/activity.module";
 import { ActivityAuditInterceptor } from "./interceptors/activity-audit.interceptor";
 import { SubscriptionPlansModule } from "@modules/subscription-plans/subscription-plans.module";
 import { PaymentsModule } from "@modules/payments/payments.module";
+import { UploadModule } from "@modules/upload/upload.module";
 
 @Module({
   imports: [
@@ -63,7 +64,8 @@ import { PaymentsModule } from "@modules/payments/payments.module";
     SystemModule,
     ActivityModule,
     SubscriptionPlansModule,
-    PaymentsModule
+    PaymentsModule,
+    UploadModule,
   ],
   controllers: [AppController],
   providers: [
