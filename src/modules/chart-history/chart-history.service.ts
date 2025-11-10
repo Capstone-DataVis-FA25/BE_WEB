@@ -43,6 +43,7 @@ export class ChartHistoryService {
         {
           data: {
             chartId: currentChart.id,
+            datasetId: currentChart.datasetId,
             name: currentChart.name,
             description: currentChart.description,
             type: currentChart.type,
