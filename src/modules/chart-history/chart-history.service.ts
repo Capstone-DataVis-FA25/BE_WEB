@@ -20,7 +20,8 @@ export class ChartHistoryService {
   async createHistorySnapshot(
     chartId: string,
     userId: string,
-    changeNote?: string
+    changeNote?: string,
+    imageUrl?: string
   ): Promise<ChartHistoryResponseDto> {
     try {
       // Lấy thông tin chart hiện tại
@@ -47,6 +48,7 @@ export class ChartHistoryService {
           config: currentChart.config,
           updatedBy: userId,
           changeNote: changeNote,
+          imageUrl: imageUrl,
         },
       });
 
@@ -165,8 +167,8 @@ export class ChartHistoryService {
         );
       }
 
-      // Lưu trạng thái hiện tại vào lịch sử trước khi restore
-      await this.createHistorySnapshot(chartId, userId, changeNote);
+  // Lưu trạng thái hiện tại vào lịch sử trước khi restore
+  await this.createHistorySnapshot(chartId, userId, changeNote);
 
       // Khôi phục chart về config cũ
       const restoredChart = await this.prismaService.prisma.chart.update({

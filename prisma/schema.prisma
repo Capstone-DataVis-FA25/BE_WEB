@@ -134,6 +134,7 @@ model ChartHistory {
   description String?
   type        String
   config      Json     // Lưu config cũ trước khi update
+  imageUrl    String?  // Đường dẫn ảnh chart history
   createdAt   DateTime @default(now())
   updatedBy   String   @db.Uuid
   changeNote  String?  // Ghi chú về thay đổi (optional)

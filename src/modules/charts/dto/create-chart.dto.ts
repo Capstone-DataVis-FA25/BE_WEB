@@ -1151,4 +1151,9 @@ export class CreateChartDto {
   @IsOptional()
   @IsString()
   datasetId?: string;
+  
+  @ApiPropertyOptional({ description: 'URL of the chart image', example: 'https://example.com/chart.png' })
+  @IsOptional()
+  @IsString()
+  imageUrl?: string;
 }

@@ -66,4 +66,10 @@ export class ChartHistoryResponseDto {
     example: 'Updated chart colors and layout',
   })
   changeNote?: string;
+  
+  @ApiPropertyOptional({
+    description: 'URL of the chart snapshot image',
+    example: 'https://res.cloudinary.com/demo/image/upload/v1234567890/chart-history.png',
+  })
+  imageUrl?: string;
 }

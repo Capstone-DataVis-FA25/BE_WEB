@@ -184,18 +184,22 @@ export class ChartsService {
 
       const createdAt = new Date();
 
+      // Extract imageUrl from updateChartDto if provided
+      const { imageUrl, ...updateData } = updateChartDto as any;
+      
       // Tạo snapshot lịch sử trước khi update
       await this.chartHistoryService.createHistorySnapshot(
         id,
         userId,
         `Restore before update: ${moment(createdAt).format('HH:mm:ss - DD.MM.YYYY')}`,
+        imageUrl,
       );
 
-      console.log('Updating chart with config:', updateChartDto.config);
+      console.log('Updating chart with config:', updateData.config);
       // Frontend sends complete config, no need for backend defaults
       const updatedChart = await this.prismaService.prisma.chart.update({
         where: { id },
-        data: updateChartDto,
+        data: updateData,
         include: {
           dataset: {
             include: {
