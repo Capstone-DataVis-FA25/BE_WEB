@@ -155,7 +155,7 @@ export class ChartHistoryService {
     chartId: string,
     historyId: string,
     userId: string,
-    changeNote?: string
+    changeNote?: string,
   ) {
     try {
       // Lấy bản snapshot từ lịch sử
@@ -167,8 +167,14 @@ export class ChartHistoryService {
         );
       }
 
+      // Tạo snapshot lịch sử trước khi update (lưu ảnh chart CŨ vào history)
+      const currentChart = await this.prismaService.prisma.chart.findUnique({
+        where: { id: chartId },
+        select: { imageUrl: true },
+      });
+
   // Lưu trạng thái hiện tại vào lịch sử trước khi restore
-  await this.createHistorySnapshot(chartId, userId, changeNote);
+  await this.createHistorySnapshot(chartId, userId, changeNote, currentChart?.imageUrl);
 
       // Khôi phục chart về config cũ
       const restoredChart = await this.prismaService.prisma.chart.update({
@@ -179,6 +185,7 @@ export class ChartHistoryService {
           type: historyRecord.type,
           config: historyRecord.config,
           datasetId: historyRecord.datasetId, // restore datasetId
+          imageUrl: historyRecord.imageUrl, // restore imageUrl
         },
         include: {
           dataset: {

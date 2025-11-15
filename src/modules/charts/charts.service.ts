@@ -129,7 +129,7 @@ export class ChartsService {
   }
 
   async create(createChartDto: CreateChartDto, userId: string) {
-    const { name, description, type, config, datasetId } = createChartDto;
+    const { name, description, type, config, datasetId, imageUrl } = createChartDto;
     console.log("Creating chart with config:", config);
     // Database operation with error handling
     try {
@@ -140,7 +140,8 @@ export class ChartsService {
           name,
           description: description || null,
           type,
-          config: config
+          config: config,
+          imageUrl: imageUrl || null,
         },
       });
     } catch (error) {
@@ -187,19 +188,28 @@ export class ChartsService {
       // Extract imageUrl from updateChartDto if provided
       const { imageUrl, ...updateData } = updateChartDto as any;
       
-      // Tạo snapshot lịch sử trước khi update
+      // Tạo snapshot lịch sử trước khi update (lưu ảnh chart CŨ vào history)
+      const currentChart = await this.prismaService.prisma.chart.findUnique({
+        where: { id },
+        select: { imageUrl: true },
+      });
+      
       await this.chartHistoryService.createHistorySnapshot(
         id,
         userId,
         `Restore before update: ${moment(createdAt).format('HH:mm:ss - DD.MM.YYYY')}`,
-        imageUrl,
+        currentChart?.imageUrl || undefined, // Lưu ảnh CŨ vào history
       );
 
       console.log('Updating chart with config:', updateData.config);
       // Frontend sends complete config, no need for backend defaults
+      // Lưu ảnh MỚI vào bảng Chart
       const updatedChart = await this.prismaService.prisma.chart.update({
         where: { id },
-        data: updateData,
+        data: {
+          ...updateData,
+          imageUrl: imageUrl || undefined, // Lưu ảnh MỚI
+        },
         include: {
           dataset: {
             include: {
