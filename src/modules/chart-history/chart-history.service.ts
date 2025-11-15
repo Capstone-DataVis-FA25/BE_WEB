@@ -20,7 +20,8 @@ export class ChartHistoryService {
   async createHistorySnapshot(
     chartId: string,
     userId: string,
-    changeNote?: string
+    changeNote?: string,
+    imageUrl?: string
   ): Promise<ChartHistoryResponseDto> {
     try {
       // Lấy thông tin chart hiện tại
@@ -36,23 +37,20 @@ export class ChartHistoryService {
         throw new ForbiddenException("You do not have access to this chart");
       }
 
-      const createdAt = currentChart.createdAt;
-
       // Tạo bản snapshot trong lịch sử
-      const historyRecord = await this.prismaService.prisma.chartHistory.create(
-        {
-          data: {
-            chartId: currentChart.id,
-            datasetId: currentChart.datasetId,
-            name: currentChart.name,
-            description: currentChart.description,
-            type: currentChart.type,
-            config: currentChart.config,
-            updatedBy: userId,
-            changeNote: changeNote,
-          },
-        }
-      );
+      const historyRecord = await this.prismaService.prisma.chartHistory.create({
+        data: {
+          chartId: currentChart.id,
+          datasetId: currentChart.datasetId, // thêm datasetId
+          name: currentChart.name,
+          description: currentChart.description,
+          type: currentChart.type,
+          config: currentChart.config,
+          updatedBy: userId,
+          changeNote: changeNote,
+          imageUrl: imageUrl,
+        },
+      });
 
       return historyRecord;
     } catch (error) {
@@ -157,7 +155,7 @@ export class ChartHistoryService {
     chartId: string,
     historyId: string,
     userId: string,
-    changeNote?: string
+    changeNote?: string,
   ) {
     try {
       // Lấy bản snapshot từ lịch sử
@@ -169,8 +167,14 @@ export class ChartHistoryService {
         );
       }
 
-      // Lưu trạng thái hiện tại vào lịch sử trước khi restore
-      await this.createHistorySnapshot(chartId, userId, changeNote);
+      // Tạo snapshot lịch sử trước khi update (lưu ảnh chart CŨ vào history)
+      const currentChart = await this.prismaService.prisma.chart.findUnique({
+        where: { id: chartId },
+        select: { imageUrl: true },
+      });
+
+  // Lưu trạng thái hiện tại vào lịch sử trước khi restore
+  await this.createHistorySnapshot(chartId, userId, changeNote, currentChart?.imageUrl);
 
       // Khôi phục chart về config cũ
       const restoredChart = await this.prismaService.prisma.chart.update({
@@ -180,6 +184,8 @@ export class ChartHistoryService {
           description: historyRecord.description,
           type: historyRecord.type,
           config: historyRecord.config,
+          datasetId: historyRecord.datasetId, // restore datasetId
+          imageUrl: historyRecord.imageUrl, // restore imageUrl
         },
         include: {
           dataset: {
@@ -242,5 +248,17 @@ export class ChartHistoryService {
         `Failed to delete history record: ${error.message}`
       );
     }
+  }
+
+  /**
+   * Lấy số lượng phiên bản lịch sử của một chart
+  */
+  async getHistoryCount(chartId: string, userId: string): Promise<number> {
+    const chart = await this.prismaService.prisma.chart.findUnique({
+      where: { id: chartId },
+    });
+    if (!chart) throw new NotFoundException('Chart not found');
+    if (chart.userId !== userId) throw new ForbiddenException('You do not have access to this chart');
+    return await this.prismaService.prisma.chartHistory.count({ where: { chartId } });
   }
 }

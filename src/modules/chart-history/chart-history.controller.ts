@@ -28,6 +28,26 @@ import { AuthRequest } from '@modules/auth/auth.controller';
 export class ChartHistoryController {
   constructor(private readonly chartHistoryService: ChartHistoryService) {}
 
+  @Get('chart/:chartId/count')
+  @ApiOperation({
+    summary: 'Get history count of a chart',
+    description: 'Return the number of history records for a specific chart.'
+  })
+  @ApiResponse({
+    status: 200,
+    description: 'History count retrieved successfully',
+    schema: { example: { count: 5 } }
+  })
+  @ApiResponse({ status: 403, description: 'Forbidden - chart access denied' })
+  @ApiResponse({ status: 404, description: 'Chart not found' })
+  @ApiParam({ name: 'chartId', description: 'ID of the chart to get history count for' })
+  async getHistoryCount(
+    @Param('chartId') chartId: string,
+    @Request() req: AuthRequest,
+  ) {
+    const count = await this.chartHistoryService.getHistoryCount(chartId, req.user.userId);
+    return { count };
+  }
   @Get('chart/:chartId')
   @ApiOperation({
     summary: 'Get all history versions of a chart',
