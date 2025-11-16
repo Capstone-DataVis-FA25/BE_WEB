@@ -14,6 +14,12 @@ export class ChartHistoryResponseDto {
   chartId: string;
 
   @ApiProperty({
+    description: 'ID of the dataset this chart uses',
+    example: 'clx1234567890abcdef',
+  })
+  datasetId: string;
+
+  @ApiProperty({
     description: 'Name of the chart at the time of this snapshot',
     example: 'Sales Chart - Version 1',
   })
@@ -60,4 +66,10 @@ export class ChartHistoryResponseDto {
     example: 'Updated chart colors and layout',
   })
   changeNote?: string;
+  
+  @ApiPropertyOptional({
+    description: 'URL of the chart snapshot image',
+    example: 'https://res.cloudinary.com/demo/image/upload/v1234567890/chart-history.png',
+  })
+  imageUrl?: string;
 }

@@ -13,6 +13,7 @@ model Chart {
   description  String?
   type         String
   config       Json
+  imageUrl    String? 
   createdAt    DateTime       @default(now())
   updatedAt    DateTime       @updatedAt
   datasetId    String?        @db.Uuid
@@ -134,6 +135,7 @@ model ChartHistory {
   description String?
   type        String
   config      Json     // Lưu config cũ trước khi update
+  imageUrl    String?  // Đường dẫn ảnh chart history
   createdAt   DateTime @default(now())
   updatedBy   String   @db.Uuid
   changeNote  String?  // Ghi chú về thay đổi (optional)
