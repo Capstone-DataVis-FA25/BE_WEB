@@ -25,9 +25,29 @@ export class AiController {
   // Clean raw CSV via AI
   @Post('clean')
   @HttpCode(HttpStatus.OK)
+  @ApiOperation({ summary: 'Clean CSV data and return a 2D JSON array' })
+  @ApiOkResponse({ 
+    description: '2D JSON array of cleaned data', 
+    schema: { 
+      type: 'object',
+      properties: {
+        data: {
+          type: 'array', 
+          items: { 
+            type: 'array', 
+            items: { 
+              oneOf: [{ type: 'string' }, { type: 'number' }, { type: 'null' }] 
+            } 
+          }
+        },
+        rowCount: { type: 'number' },
+        columnCount: { type: 'number' }
+      }
+    } 
+  })
   async clean(@Body() body: CleanCsvDto) {
-    const cleanedCsv = await this.aiService.cleanCsv(body);
-    return { cleanedCsv };
+    const result = await this.aiService.cleanCsv(body);
+    return result;
   }
 
   // Clean uploaded Excel/CSV and return a 2D JSON matrix via AI
@@ -35,7 +55,25 @@ export class AiController {
   @ApiOperation({ summary: 'Clean data from an uploaded Excel/CSV file and return a 2D JSON array' })
   @ApiConsumes('multipart/form-data')
   @ApiBody({ type: CleanExcelUploadDto })
-  @ApiOkResponse({ description: '2D JSON array of cleaned data', schema: { type: 'array', items: { type: 'array', items: { oneOf: [{ type: 'string' }, { type: 'number' }, { type: 'null' }] } } } })
+  @ApiOkResponse({ 
+    description: '2D JSON array of cleaned data', 
+    schema: { 
+      type: 'object',
+      properties: {
+        data: {
+          type: 'array', 
+          items: { 
+            type: 'array', 
+            items: { 
+              oneOf: [{ type: 'string' }, { type: 'number' }, { type: 'null' }] 
+            } 
+          }
+        },
+        rowCount: { type: 'number' },
+        columnCount: { type: 'number' }
+      }
+    } 
+  })
   @UseInterceptors(FileInterceptor('file'))
   @HttpCode(HttpStatus.OK)
   async cleanExcel(

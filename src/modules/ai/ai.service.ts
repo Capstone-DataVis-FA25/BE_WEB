@@ -87,7 +87,7 @@ export class AiService {
     return raw?.trim() || '';
   }
 
-  async cleanCsv(payload: CleanCsvDto): Promise<string> {
+  async cleanCsv(payload: CleanCsvDto): Promise<{ data: any[][]; rowCount: number; columnCount: number }> {
     if (!this.apiKey) {
       this.logger.error('OPENROUTER_API_KEY is not configured');
       throw new InternalServerErrorException('AI service is not configured');
@@ -117,18 +117,31 @@ export class AiService {
     }
 
     const data = await res.json();
-    const cleanedCsv = data?.choices?.[0]?.message?.content?.trim();
-    if (!cleanedCsv) {
+    const content = data?.choices?.[0]?.message?.content?.trim();
+    if (!content) {
       this.logger.error('OpenRouter API returned no content');
       throw new InternalServerErrorException('AI returned empty response');
     }
-    return cleanedCsv;
+
+    // Parse AI response as JSON matrix instead of CSV
+    const matrix = this.tryParseJsonMatrix(content);
+    if (!matrix || !matrix.length) {
+      this.logger.error('AI returned invalid matrix JSON');
+      throw new InternalServerErrorException('AI returned invalid matrix JSON');
+    }
+
+    return {
+      data: matrix,
+      rowCount: matrix.length,
+      columnCount: matrix[0]?.length || 0,
+    };
   }
 
   private buildSystemPrompt(payload: CleanCsvDto): string {
     const rules: string[] = [
-      'You are a strict CSV cleaner. Output must be ONLY valid CSV text, no markdown, no code fences, no explanations.',
-      'Keep the header row. Maintain the same columns unless instructed to drop/rename by the provided schema.',
+      'You are a strict data cleaner for tabular data.',
+      'Output must be ONLY a valid JSON array of arrays (2D matrix). No markdown, no code fences, no extra text.',
+      'The first inner array must be the header row.',
       
       '## Duplicate Handling:',
       '- Remove exact duplicate rows (keep only the first occurrence).',
@@ -136,7 +149,7 @@ export class AiService {
       
       '## Missing & Empty Data:',
       '- Remove rows that are entirely empty or contain only whitespace.',
-      '- For cells with missing values (empty, "N/A", "NA", "null", "NULL", "-", "?", "#N/A"), leave them as empty string.',
+      '- For cells with missing values (empty, "N/A", "NA", "null", "NULL", "-", "?", "#N/A"), use empty string ("").',
       '- Do NOT fill missing values with defaults unless explicitly instructed.',
       
       '## Whitespace & Formatting:',
@@ -145,8 +158,8 @@ export class AiService {
       '- Remove zero-width characters (U+200B, U+FEFF, etc.) and special Unicode whitespace.',
       
       '## Data Type Validation:',
-      '- For numeric columns: remove currency symbols, units, and non-numeric characters except valid separators. If result is invalid, leave empty.',
-      '- For date columns: attempt to parse and standardize. If unparseable, leave empty.',
+      '- For numeric columns: remove currency symbols, units, and non-numeric characters except valid separators. If result is invalid, use empty string.',
+      '- For date columns: attempt to parse and standardize. If unparseable, use empty string.',
       '- For text columns: remove control characters (U+0000 to U+001F except tabs/newlines), normalize quotes.',
       
       '## Outlier Detection (conservative):',
@@ -158,8 +171,8 @@ export class AiService {
       '- Fix common typos in known categorical columns if schema example is provided.',
       '- Ensure Boolean-like columns use consistent values (e.g., "Yes"/"No" or "1"/"0").',
       
-      'Do not invent data. If a value cannot be deterministically fixed, leave it blank.',
-      'Escape commas, quotes, and line breaks according to RFC 4180 as needed.',
+      'Do not invent data. If a value cannot be deterministically fixed, use empty string.',
+      'Return ONLY valid JSON array of arrays, no other text.',
     ];
     
     if (payload.schemaExample) {
@@ -167,7 +180,7 @@ export class AiService {
     }
     
     if (payload.thousandsSeparator || payload.decimalSeparator) {
-      rules.push(`For numeric columns, use thousands separator "${payload.thousandsSeparator ?? ''}" and decimal separator "${payload.decimalSeparator ?? ''}".`);
+      rules.push(`For numeric columns, format with thousands separator "${payload.thousandsSeparator ?? ''}" and decimal separator "${payload.decimalSeparator ?? ''}".`);
     }
     
     if (payload.dateFormat) {
@@ -182,16 +195,17 @@ export class AiService {
     if (payload.notes) preface.push(`Notes: ${payload.notes}`);
     if (payload.schemaExample) preface.push('CSV Schema Example:\n' + payload.schemaExample);
     preface.push('Original CSV:\n' + payload.csv);
+    preface.push('Return only the cleaned data as a JSON array of arrays (2D matrix). First array is the header row.');
     return preface.join('\n\n');
   }
 
-  async cleanExcelToMatrix(input: { file: any; options?: { thousandsSeparator?: string; decimalSeparator?: string; dateFormat?: string; schemaExample?: string; notes?: string } }): Promise<any[][]> {
+  async cleanExcelToMatrix(input: { file: any; options?: { thousandsSeparator?: string; decimalSeparator?: string; dateFormat?: string; schemaExample?: string; notes?: string } }): Promise<{ data: any[][]; rowCount: number; columnCount: number }> {
     const { file, options } = input || {};
     if (!file) throw new BadRequestException('File is required');
     const buffer: Buffer = await this.resolveFileBuffer(file);
     const rows = this.extractRowsFromFile(buffer, file.originalname || file.filename || 'upload');
     if (!rows.length || !rows[0]?.length) throw new BadRequestException('Uploaded file has no data');
-    const csv = this.rowsToCsv(rows);
+    const csv = await this.rowsToCsv(rows);
 
     if (!this.apiKey) {
       this.logger.error('OPENROUTER_API_KEY is not configured');
@@ -218,11 +232,16 @@ export class AiService {
     const data = await res.json();
     const content = data?.choices?.[0]?.message?.content ?? '';
     const matrix = this.tryParseJsonMatrix(content);
-    if (!matrix) {
+    if (!matrix || !matrix.length) {
       this.logger.error('AI returned invalid matrix JSON');
       throw new InternalServerErrorException('AI returned invalid matrix JSON');
     }
-    return matrix;
+
+    return {
+      data: matrix,
+      rowCount: matrix.length,
+      columnCount: matrix[0]?.length || 0,
+    };
   }
 
   private async resolveFileBuffer(file: any): Promise<Buffer> {
@@ -278,18 +297,49 @@ export class AiService {
     return result;
   }
 
-  private rowsToCsv(rows: any[][]): string {
-    return rows
-      .map(r => r
-        .map((v) => {
-          const s = String(v ?? '');
-          if (s.includes('"') || s.includes(',') || /\r|\n/.test(s)) {
-            return '"' + s.replace(/"/g, '""') + '"';
-          }
-          return s;
-        })
-        .join(','))
-      .join('\n');
+  private async rowsToCsv(rows: any[][]): Promise<string> {
+    // For large datasets, process rows in chunks concurrently to reduce blocking
+    const CHUNK_SIZE = 1000;
+
+    const formatCell = (v: any) => {
+      const s = String(v ?? '').trim();
+      // Detect numbers using comma as decimal separator (e.g., "123,45" or "1.234,56")
+      const commaDecimalRegex = /^[\d\.\s]+,\d+$/;
+      let out = s;
+      if (commaDecimalRegex.test(s)) {
+        // Wrap with '(, ... )' so downstream processors can detect comma-decimal numbers.
+        out = `(,${s})`;
+      }
+      if (out.includes('"') || out.includes(',') || /\r|\n/.test(out)) {
+        return '"' + out.replace(/"/g, '""') + '"';
+      }
+      return out;
+    };
+
+    const formatRow = (r: any[]) => r.map(formatCell).join(',');
+
+    if (rows.length <= CHUNK_SIZE) {
+      return rows.map(formatRow).join('\n');
+    }
+
+    // Split into chunks (keep header in first chunk only)
+    const header = rows[0];
+    const dataRows = rows.slice(1);
+    const chunks: any[][][] = [];
+    for (let i = 0; i < dataRows.length; i += CHUNK_SIZE) {
+      chunks.push(dataRows.slice(i, i + CHUNK_SIZE));
+    }
+
+    // Process chunks in parallel using Promise.all to improve throughput for large datasets
+    const chunkPromises = chunks.map((chunk, idx) => {
+      return Promise.resolve().then(() => {
+        const rowsToFormat = idx === 0 ? [header, ...chunk] : chunk;
+        return rowsToFormat.map(formatRow).join('\n');
+      });
+    });
+
+    const chunkResults = await Promise.all(chunkPromises as any);
+    return chunkResults.join('\n');
   }
 
   private buildMatrixSystemPrompt(opts: { thousandsSeparator?: string; decimalSeparator?: string; dateFormat?: string }): string {
