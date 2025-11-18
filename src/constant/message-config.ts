@@ -25,4 +25,8 @@ export const Messages = {
   SUBSCRIPTION_PLAN_CREATE_SUCCESS: "Subscription plan created successfully",
   SUBSCRIPTION_PLAN_UPDATE_SUCCESS: "Subscription plan updated successfully",
   SUBSCRIPTION_PLAN_DELETE_SUCCESS: "Subscription plan deleted successfully",
+  // Subscription limit messages
+  DATASET_LIMIT_EXCEEDED: "You have reached the maximum number of datasets allowed for your subscription plan",
+  CHART_LIMIT_EXCEEDED: "You have reached the maximum number of charts allowed for your subscription plan",
+  NO_SUBSCRIPTION_PLAN: "No subscription plan found for your account",
 };
