@@ -39,10 +39,14 @@ export class ActivityService {
         },
       });
 
-      // 2. Push vào Redis Stream (để consumer đọc & phát)
-      const streamId = await this.redis.xadd(
-        'activity_logs_stream', // stream key
-        '*', // auto id
+      // Debug: log what was saved and what will be pushed to Redis stream
+      try {
+        this.logger.debug('Activity saved to DB: ' + JSON.stringify(saved));
+      } catch (e) {
+        this.logger.debug('Activity saved to DB (non-serializable)');
+      }
+
+      const streamFields = [
         'id', saved.id,
         'actorId', saved.actorId ?? '',
         'actorType', saved.actorType ?? '',
@@ -50,10 +54,36 @@ export class ActivityService {
         'resource', saved.resource ?? '',
         'metadata', JSON.stringify(saved.metadata ?? {}),
         'createdAt', saved.createdAt ? saved.createdAt.toISOString() : new Date().toISOString()
-      );
+      ];
 
-      this.logger.debug(`Pushed to stream id=${streamId}`);
-      return saved;
+      try {
+        this.logger.debug('Pushing to Redis stream with fields: ' + JSON.stringify(streamFields));
+      } catch (e) {
+        this.logger.debug('Pushing to Redis stream (non-serializable)');
+      }
+
+      // 2. Push vào Redis Stream (để consumer đọc & phát)
+      try {
+        const streamId = await this.redis.xadd(
+          'activity_logs_stream', // stream key
+          '*', // auto id
+          ...streamFields
+        );
+
+        this.logger.debug(`Pushed to stream id=${streamId}`);
+        return saved;
+      } catch (err) {
+        // Log the error and the payload that failed to push so you can inspect
+        this.logger.error('Failed to push activity to Redis stream:', err as any);
+        try {
+          this.logger.debug('Redis push payload (for inspection): ' + JSON.stringify({ streamKey: 'activity_logs_stream', fields: streamFields }));
+        } catch (e) {
+          this.logger.debug('Redis push payload (non-serializable)');
+        }
+        // Rethrow or return saved depending on desired behavior — return saved so DB record remains
+        return saved;
+      }
+
     } catch (error) {
       this.logger.error('Failed to create activity log:', error);
       throw error;
