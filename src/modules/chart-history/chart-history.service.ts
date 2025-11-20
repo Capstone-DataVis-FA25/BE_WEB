@@ -11,7 +11,7 @@ import { ChartHistoryResponseDto } from "./dto";
 
 @Injectable()
 export class ChartHistoryService {
-  constructor(private readonly prismaService: PrismaService) {}
+  constructor(private readonly prismaService: PrismaService) { }
 
   /**
    * Tạo bản sao lưu của chart hiện tại vào lịch sử
@@ -173,8 +173,8 @@ export class ChartHistoryService {
         select: { imageUrl: true },
       });
 
-  // Lưu trạng thái hiện tại vào lịch sử trước khi restore
-  await this.createHistorySnapshot(chartId, userId, changeNote, currentChart?.imageUrl);
+      // Lưu trạng thái hiện tại vào lịch sử trước khi restore
+      await this.createHistorySnapshot(chartId, userId, changeNote, currentChart?.imageUrl);
 
       // Khôi phục chart về config cũ
       const restoredChart = await this.prismaService.prisma.chart.update({
