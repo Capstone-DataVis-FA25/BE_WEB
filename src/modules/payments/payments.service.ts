@@ -19,6 +19,27 @@ export class PaymentsService {
             throw new NotFoundException('Subscription plan not found');
         }
 
+        const user = await this.prismaService.prisma.user.findUnique({ where: { id: userId } });
+
+        if (user.subscriptionPlanId) {
+            const currentPlan = await this.prismaService.prisma.subscriptionPlan.findUnique({ where: { id: user.subscriptionPlanId } });
+            if (currentPlan && currentPlan.price >= plan.price) {
+                throw new BadRequestException('Cannot downgrade or subscribe to a cheaper plan');
+            }
+            await this.prismaService.prisma.user.update({
+                where: { id: userId },
+                data: { subscriptionPlanId: null },
+            });
+        }
+
+        if (user.subscriptionPlanId === planId) {
+            throw new BadRequestException('User already subscribed to this plan');
+        }
+
+        if (!plan.isActive) {
+            throw new BadRequestException('Subscription plan is not active');
+        }
+
         // Create a PENDING transaction in DB
         const orderCode = Date.now() + parseInt(uuidv4().slice(-5), 16);
         const tx = await this.prismaService.prisma.paymentTransaction.create({

@@ -11,15 +11,23 @@ import { CreateDatasetDto, CreateDataHeaderDto } from "./dto/create-dataset.dto"
 import { UpdateDatasetDto } from "./dto/update-dataset.dto";
 import { Prisma } from "@prisma/client";
 import { KmsService } from "../kms/kms.service";
+import { SubscriptionPlansService } from "../subscription-plans/subscription-plans.service";
 
 @Injectable()
 export class DatasetsService {
   constructor(
     private readonly prismaService: PrismaService,
-    private readonly kmsService: KmsService
+    private readonly kmsService: KmsService,
+    private readonly subscriptionPlansService: SubscriptionPlansService,
   ) { }
 
   async create(createDatasetDto: CreateDatasetDto, userId: string) {
+    // Check subscription limit first
+    const limitCheck = await this.subscriptionPlansService.canCreateDataset(userId);
+    if (!limitCheck.allowed) {
+      throw new ForbiddenException(limitCheck.message);
+    }
+
     const { headers, name, description, thousandsSeparator, decimalSeparator } = createDatasetDto;
 
     // Validate header names are unique
@@ -30,9 +38,9 @@ export class DatasetsService {
     }
 
     // Validate data types in headers
-   // console.log('🔍 Validating headers:', headers.map(h => ({ name: h.name, type: h.type, dataLength: h.data.length })));
+    // console.log('🔍 Validating headers:', headers.map(h => ({ name: h.name, type: h.type, dataLength: h.data.length })));
     const validation = this.validateHeaderDataTypes(headers);
-   // console.log('🔍 Validation result:', validation);
+    // console.log('🔍 Validation result:', validation);
     if (!validation.isValid) {
       throw new BadRequestException(`Data type validation failed: ${validation.errors.join(', ')}`);
     }

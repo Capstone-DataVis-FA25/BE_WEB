@@ -49,4 +49,9 @@ export class CreateUserDto {
   @IsOptional()
   @IsString()
   currentVerifyToken?: string;
+
+  @ApiProperty({ required: false })
+  @IsOptional()
+  @IsString()
+  subscriptionPlanId?: string;
 }

@@ -30,7 +30,6 @@ export class SubscriptionPlansService {
                     currency: createSubscriptionPlanDto.currency || "USD",
                     interval: createSubscriptionPlanDto.interval || "month",
                     isActive: createSubscriptionPlanDto.isActive ?? true,
-                    sortOrder: createSubscriptionPlanDto.sortOrder ?? 0,
                 },
             });
 
@@ -51,7 +50,7 @@ export class SubscriptionPlansService {
     async findAll() {
         try {
             const plans = await this.prismaService.prisma.subscriptionPlan.findMany({
-                orderBy: { sortOrder: "asc" },
+                orderBy: { createdAt: "asc" },
             });
             return plans;
         } catch (error) {
@@ -160,12 +159,114 @@ export class SubscriptionPlansService {
         try {
             const plans = await this.prismaService.prisma.subscriptionPlan.findMany({
                 where: { isActive: true },
-                orderBy: { sortOrder: "asc" },
+                orderBy: { createdAt: "asc" },
             });
             return plans;
         } catch (error) {
             throw new BadRequestException(
                 `Failed to fetch active subscription plans: ${error.message}`
+            );
+        }
+    }
+
+    // Helper method to check if user can create more datasets
+    async canCreateDataset(userId: string): Promise<{ allowed: boolean; message?: string }> {
+        try {
+            // Get user with their subscription plan
+            const user = await this.prismaService.prisma.user.findUnique({
+                where: { id: userId },
+                include: {
+                    subscriptionPlan: true,
+                    datasets: true,
+                },
+            });
+
+            if (!user) {
+                throw new NotFoundException("User not found");
+            }
+
+            // If user has no subscription plan, they can't create datasets
+            if (!user.subscriptionPlan) {
+                return {
+                    allowed: false,
+                    message: Messages.NO_SUBSCRIPTION_PLAN,
+                };
+            }
+
+            // Check if plan has limits
+            const limits = user.subscriptionPlan.limits as any;
+            if (!limits || typeof limits.maxDatasets !== 'number') {
+                // No limit set, allow unlimited
+                return { allowed: true };
+            }
+
+            // Check current count against limit
+            const currentCount = user.datasets.length;
+            if (currentCount >= limits.maxDatasets) {
+                return {
+                    allowed: false,
+                    message: Messages.DATASET_LIMIT_EXCEEDED,
+                };
+            }
+
+            return { allowed: true };
+        } catch (error) {
+            if (error instanceof NotFoundException) {
+                throw error;
+            }
+            throw new BadRequestException(
+                `Failed to check dataset limit: ${error.message}`
+            );
+        }
+    }
+
+    // Helper method to check if user can create more charts
+    async canCreateChart(userId: string): Promise<{ allowed: boolean; message?: string }> {
+        try {
+            // Get user with their subscription plan
+            const user = await this.prismaService.prisma.user.findUnique({
+                where: { id: userId },
+                include: {
+                    subscriptionPlan: true,
+                    charts: true,
+                },
+            });
+
+            if (!user) {
+                throw new NotFoundException("User not found");
+            }
+
+            // If user has no subscription plan, they can't create charts
+            if (!user.subscriptionPlan) {
+                return {
+                    allowed: false,
+                    message: Messages.NO_SUBSCRIPTION_PLAN,
+                };
+            }
+
+            // Check if plan has limits
+            const limits = user.subscriptionPlan.limits as any;
+            if (!limits || typeof limits.maxCharts !== 'number') {
+                // No limit set, allow unlimited
+                return { allowed: true };
+            }
+
+            // Check current count against limit
+            const currentCount = user.charts.length;
+            if (currentCount >= limits.maxCharts) {
+                return {
+                    allowed: false,
+                    message: Messages.CHART_LIMIT_EXCEEDED,
+                };
+            }
+
+            return { allowed: true };
+        } catch (error) {
+            if (error instanceof NotFoundException) {
+                throw error;
+            }
+            throw new BadRequestException(
+                `Failed to check chart limit: ${error.message}`
             );
         }
     }
