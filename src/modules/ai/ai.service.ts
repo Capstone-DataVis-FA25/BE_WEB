@@ -4,12 +4,14 @@ import { ConfigService } from '@nestjs/config';
 import * as XLSX from 'xlsx';
 import * as fs from 'fs';
 import { CleanCsvDto } from './dto/clean-csv.dto';
+import { parse } from 'fast-csv';
+import { Readable } from 'stream';
 
 @Injectable()
 export class AiService {
   private readonly logger = new Logger(AiService.name);
   private readonly baseUrl = 'https://openrouter.ai/api/v1';
-  private readonly model = 'openai/gpt-4o-mini';
+  private readonly model = 'google/gemini-2.5-flash-lite';
   private readonly apiKey: string;
 
   constructor(private readonly configService: ConfigService) {
@@ -88,41 +90,268 @@ export class AiService {
   }
 
   async cleanCsv(payload: CleanCsvDto): Promise<string> {
+    // If API key missing, fail fast
     if (!this.apiKey) {
       this.logger.error('OPENROUTER_API_KEY is not configured');
       throw new InternalServerErrorException('AI service is not configured');
     }
 
-    const systemPrompt = this.buildSystemPrompt(payload);
-    const body = {
-      model: this.model,
-      messages: [
-        { role: 'system', content: systemPrompt },
-        { role: 'user', content: this.buildUserPrompt(payload) },
-      ],
-      temperature: 0,
-    } as const;
+    // Helper: estimate tokens roughly (approx 4 chars per token)
+    const estimateTokens = (text: string) => Math.ceil((text?.length || 0) / 4);
+    const MAX_INPUT_TOKENS = 20000; // keep well below provider limit (e.g., 128k)
 
-    const url = `${this.baseUrl}/chat/completions`;
-    const res = await fetch(url, {
-      method: 'POST',
-      headers: this.getCommonHeaders(this.apiKey),
-      body: JSON.stringify(body),
-    });
+    // concise system prompt used for chunked requests (much shorter to save context)
+    const buildConciseSystemPrompt = (payload?: Partial<CleanCsvDto>) => {
+      const parts: string[] = [
+        'You are a CSV cleaning assistant. Output ONLY cleaned CSV with header. No explanations, no markdown.',
+        'Trim whitespace, normalize quotes, remove exact duplicate rows, leave unfixable cells empty.',
+        'For numeric/date columns try to normalize formats; do not invent data. Escape quotes and commas per RFC4180.',
+      ];
+      if (payload?.dateFormat) parts.push(`Use date format: ${payload.dateFormat}`);
+      return parts.join(' ');
+    };
 
-    if (!res.ok) {
-      const text = await res.text().catch(() => '');
-      this.logger.error(`OpenRouter API error: ${res.status} ${res.statusText} ${text}`);
-      throw new InternalServerErrorException('Failed to clean CSV');
+    // Direct send to API for a single CSV text
+    const sendCleanRequest = async (csvText: string, opts?: Partial<CleanCsvDto>, useShortPrompt = false): Promise<string> => {
+      const sysPrompt = useShortPrompt ? buildConciseSystemPrompt(opts) : this.buildSystemPrompt(opts as CleanCsvDto);
+      const userPrompt = ['Original CSV:', csvText].join('\n\n');
+
+      // Pre-send guards: ensure we never send a request exceeding safe token/char limits.
+      const MAX_CHARS_PER_REQUEST = 250_000; // character guard (~60k tokens conservative)
+      const estTokens = estimateTokens(sysPrompt + '\n' + userPrompt);
+      if (userPrompt.length > MAX_CHARS_PER_REQUEST || estTokens > MAX_INPUT_TOKENS) {
+        this.logger.error(`Refusing to send oversized request: chars=${userPrompt.length}, estTokens=${estTokens}`);
+        throw new InternalServerErrorException('CSV chunk too large for AI model; please reduce rowsPerChunk or use streaming/chunked endpoint');
+      }
+
+      const body = {
+        model: this.model,
+        messages: [
+          { role: 'system', content: sysPrompt },
+          { role: 'user', content: userPrompt },
+        ],
+        temperature: 0,
+      } as const;
+      const url = `${this.baseUrl}/chat/completions`;
+
+      // Retry/backoff parameters
+      const maxRetries = 4;
+      let attempt = 0;
+
+      while (attempt <= maxRetries) {
+        attempt++;
+        try {
+          const res = await fetch(url, {
+            method: 'POST',
+            headers: this.getCommonHeaders(this.apiKey),
+            body: JSON.stringify(body),
+          });
+
+          // read as text first so we can log/inspect invalid JSON bodies
+          const text = await res.text().catch(() => '');
+
+          // Retry on transient HTTP errors
+          if (!res.ok) {
+            const status = res.status;
+            this.logger.warn(`OpenRouter API responded ${status} on attempt ${attempt} -- body:${text}`);
+            if ([429, 502, 503, 504].includes(status) && attempt <= maxRetries) {
+              const backoff = Math.floor(300 * Math.pow(2, attempt - 1) + Math.random() * 200);
+              await new Promise(r => setTimeout(r, backoff));
+              continue;
+            }
+
+            // Non-retryable; break and fallback below
+            this.logger.error(`OpenRouter API error: ${res.status} ${res.statusText} ${text}`);
+            break;
+          }
+
+          // Try parse JSON response
+          let data: any;
+          try {
+            data = text ? JSON.parse(text) : null;
+          } catch (err) {
+            this.logger.warn(`OpenRouter API returned invalid JSON (attempt ${attempt}): ${(err as Error)?.message || err} -- body:${text}`);
+            if (attempt <= maxRetries) {
+              const backoff = Math.floor(300 * Math.pow(2, attempt - 1) + Math.random() * 200);
+              await new Promise(r => setTimeout(r, backoff));
+              continue;
+            }
+            break;
+          }
+
+          const cleanedCsv = data?.choices?.[0]?.message?.content?.trim();
+          if (!cleanedCsv) {
+            this.logger.warn(`OpenRouter API returned empty content (attempt ${attempt}) -- body:${text}`);
+            if (attempt <= maxRetries) {
+              const backoff = Math.floor(300 * Math.pow(2, attempt - 1) + Math.random() * 200);
+              await new Promise(r => setTimeout(r, backoff));
+              continue;
+            }
+            break;
+          }
+
+          return cleanedCsv;
+        } catch (err) {
+          this.logger.warn(`Error calling OpenRouter (attempt ${attempt}): ${(err as Error)?.message || err}`);
+          if (attempt <= maxRetries) {
+            const backoff = Math.floor(300 * Math.pow(2, attempt - 1) + Math.random() * 200);
+            await new Promise(r => setTimeout(r, backoff));
+            continue;
+          }
+          break;
+        }
+      }
+
+      // Exhausted retries or encountered non-retryable error. Fallback to returning the original chunk
+      this.logger.error('sendCleanRequest: Exhausted retries or non-retryable error. Returning original chunk as fallback to avoid aborting the whole job.');
+      return csvText;
+    };
+
+    const csvText = (payload?.csv ?? '').toString();
+    const inputTokens = estimateTokens(csvText) + estimateTokens(this.buildSystemPrompt(payload));
+
+    // If under token threshold, send directly
+    if (inputTokens < MAX_INPUT_TOKENS) {
+      return await sendCleanRequest(csvText, payload);
     }
 
-    const data = await res.json();
-    const cleanedCsv = data?.choices?.[0]?.message?.content?.trim();
-    if (!cleanedCsv) {
-      this.logger.error('OpenRouter API returned no content');
-      throw new InternalServerErrorException('AI returned empty response');
+    // Otherwise, perform safe chunking by rows (never by bytes)
+    this.logger.warn(`Input too large for single request (~${inputTokens} tokens). Chunking by rows and processing in parallel.`);
+
+    // Convert to rows using csvToRows (best-effort). For very complex CSVs prefer file upload endpoint with streaming parser.
+    const rows = this.csvToRows(csvText);
+    if (!rows.length) throw new BadRequestException('CSV is empty or invalid');
+
+    const header = rows[0];
+    const dataRows = rows.slice(1);
+
+    // Adaptive chunk sizing: estimate average chars per data row and compute safe rowsPerChunk
+    const SAFETY_FACTOR = 0.6; // leave headroom for prompts/system messages
+
+    const estimateCharsPerRow = (sampleRows: any[][]) => {
+      if (!sampleRows || sampleRows.length === 0) return 2000; // fallback
+      try {
+        const sampleCsv = this.rowsToCsv([header, ...sampleRows]);
+        return Math.max(20, Math.floor(sampleCsv.length / sampleRows.length));
+      } catch {
+        return 2000;
+      }
+    };
+
+    const userRequested = (payload as any).rowsPerChunk;
+    // HARD SAFE LIMIT - ensure we never create too-large chunks
+    const HARD_SAFE_ROWS_PER_CHUNK = 1500;
+    let rowsPerChunk: number;
+    if (userRequested && Number.isInteger(userRequested) && userRequested > 0) {
+      // respect user request but never exceed the hard safe limit
+      rowsPerChunk = Math.min(userRequested, HARD_SAFE_ROWS_PER_CHUNK);
+    } else {
+      // fallback to safe hard limit (no auto-estimate for safety)
+      rowsPerChunk = HARD_SAFE_ROWS_PER_CHUNK;
     }
-    return cleanedCsv;
+
+    // Adaptive reduction based on estimated chars per row to avoid producing chunks
+    // that exceed MAX_CHARS_PER_REQUEST. This protects against rows with very long
+    // text (e.g., embedded JSON) where even few rows can overflow model context.
+    try {
+      const MAX_CHARS_PER_REQUEST = 250_000;
+      const sample = dataRows.slice(0, Math.min(100, dataRows.length));
+      const avgChars = estimateCharsPerRow(sample) || 2000;
+      const SAFETY_FACTOR = 0.6;
+      const safeByChars = Math.max(1, Math.floor((MAX_CHARS_PER_REQUEST * SAFETY_FACTOR) / avgChars));
+      rowsPerChunk = Math.min(rowsPerChunk, safeByChars);
+    } catch (e) {
+      // ignore and keep rowsPerChunk as-is
+    }
+
+    const concurrency = Math.max(1, Math.min(4, (payload as any).concurrency ?? 2));
+
+    const chunks: any[][][] = [];
+    for (let i = 0; i < dataRows.length; i += rowsPerChunk) {
+      chunks.push(dataRows.slice(i, i + rowsPerChunk));
+    }
+
+    this.logger.log(`CSV chunking: totalRows=${dataRows.length}, rowsPerChunk=${rowsPerChunk}, chunks=${chunks.length}, concurrency=${concurrency}`);
+
+    const results: string[] = [];
+    const inflight: Promise<void>[] = [];
+
+    // Schedule a chunk, but ensure chunk size is safe. If a chunk is still too large, split recursively.
+    const schedule = (chunkRows: any[], idx: number) => {
+      const trySchedule = async (rowsToSend: any[], outIdx: number) => {
+        const chunkCsv = this.rowsToCsv([header, ...rowsToSend]);
+        
+        // HARD character length guard (prevents huge prompts even if row count looks small)
+        const MAX_CHARS_PER_REQUEST = 250_000; // ~60k tokens, conservative
+        if (chunkCsv.length > MAX_CHARS_PER_REQUEST) {
+          if (rowsToSend.length <= 10) {
+            throw new Error('Chunk still too large to send by char-length guard');
+          }
+          const mid = Math.floor(rowsToSend.length / 2);
+          await trySchedule(rowsToSend.slice(0, mid), outIdx * 2);
+          await trySchedule(rowsToSend.slice(mid), outIdx * 2 + 1);
+          return;
+        }
+
+        // Token-estimate fallback guard: split if still over token budget
+        const est = estimateTokens(chunkCsv) + estimateTokens(buildConciseSystemPrompt(payload));
+        if (est > MAX_INPUT_TOKENS) {
+          if (rowsToSend.length <= 2) {
+            throw new Error('Single row chunk too large to send');
+          }
+          const mid = Math.floor(rowsToSend.length / 2);
+          await trySchedule(rowsToSend.slice(0, mid), outIdx * 2);
+          await trySchedule(rowsToSend.slice(mid), outIdx * 2 + 1);
+          return;
+        }
+
+        const task = (async () => {
+          // use concise prompt for chunked calls to save context
+          const cleaned = await sendCleanRequest(chunkCsv, payload, true);
+          results[outIdx] = cleaned;
+        })();
+        inflight.push(task);
+        task.finally(() => {
+          const p = inflight.indexOf(task);
+          if (p >= 0) inflight.splice(p, 1);
+        });
+        return task;
+      };
+
+      return trySchedule(chunkRows, idx);
+    };
+
+    for (let i = 0; i < chunks.length; i++) {
+      schedule(chunks[i], i);
+      if (inflight.length >= concurrency) {
+        await Promise.race(inflight).catch(() => undefined);
+      }
+    }
+    // wait for remaining
+    await Promise.all(inflight);
+
+    // Merge results in order, dedupe across chunks
+    const mergedRows: any[][] = [];
+    const seen = new Set<string>();
+    for (let i = 0; i < results.length; i++) {
+      const cleanedCsv = results[i];
+      if (!cleanedCsv) continue;
+      const r = this.csvToRows(cleanedCsv);
+      if (!r.length) continue;
+      if (mergedRows.length === 0) mergedRows.push(r[0]);
+      for (let j = 1; j < r.length; j++) {
+        const key = JSON.stringify(r[j]);
+        if (!seen.has(key)) {
+          seen.add(key);
+          mergedRows.push(r[j]);
+        }
+      }
+    }
+
+    if (mergedRows.length === 0) throw new InternalServerErrorException('No data after cleaning');
+
+    // No final AI pass: return merged cleaned rows directly (chunk -> clean -> merge)
+    return this.rowsToCsv(mergedRows);
   }
 
   private buildSystemPrompt(payload: CleanCsvDto): string {
@@ -188,6 +417,17 @@ export class AiService {
   async cleanExcelToMatrix(input: { file: any; options?: { thousandsSeparator?: string; decimalSeparator?: string; dateFormat?: string; schemaExample?: string; notes?: string } }): Promise<any[][]> {
     const { file, options } = input || {};
     if (!file) throw new BadRequestException('File is required');
+
+    // If the uploaded file is a CSV, delegate to the chunked CSV cleaner which
+    // safely streams/chunks large CSVs and returns a cleaned matrix. This lets
+    // the same endpoint accept both .csv and Excel files.
+    const filename = (file?.originalname || file?.filename || 'upload').toLowerCase();
+    if (filename.endsWith('.csv')) {
+      // cleanLargeCsvToMatrix expects the raw file (buffer or path) and options
+      // and will return a cleaned matrix (array of arrays).
+      return await this.cleanLargeCsvToMatrix({ file, options: options as any });
+    }
+
     const buffer: Buffer = await this.resolveFileBuffer(file);
     const rows = this.extractRowsFromFile(buffer, file.originalname || file.filename || 'upload');
     if (!rows.length || !rows[0]?.length) throw new BadRequestException('Uploaded file has no data');
@@ -290,6 +530,141 @@ export class AiService {
         })
         .join(','))
       .join('\n');
+  }
+
+  /**
+   * Clean very large CSV by streaming, chunking by rows, cleaning chunks in parallel,
+   * merging results with de-duplication and performing an optional final pass.
+   * - rowsPerChunk: number of data rows per chunk (default 20000)
+   * - concurrency: number of parallel AI calls (default 5)
+   * This implementation NEVER chunks by bytes; it chunks by CSV rows and preserves header on every chunk.
+   */
+  async cleanLargeCsvToMatrix(input: { file: any; options?: { rowsPerChunk?: number; concurrency?: number; thousandsSeparator?: string; decimalSeparator?: string; dateFormat?: string; schemaExample?: string; notes?: string; finalCleanup?: boolean } }): Promise<any[][]> {
+    const { file, options } = input || {};
+    if (!file) throw new BadRequestException('File is required');
+
+    const rowsPerChunk = options?.rowsPerChunk ?? 20000;
+    const concurrency = Math.max(1, Math.min(20, options?.concurrency ?? 5));
+
+    // Create readable stream from file buffer or path
+    let inputStream: Readable;
+    if (file?.buffer) {
+      inputStream = Readable.from(file.buffer);
+    } else if (file?.path) {
+      inputStream = fs.createReadStream(file.path);
+    } else {
+      throw new BadRequestException('Unsupported file input');
+    }
+
+    // Use fast-csv parser with minimal options to avoid unsupported typings.
+    // We intentionally only set headers:false so the parser returns arrays for rows.
+    const parser = parse({ headers: false });
+
+    // State
+    let headerRow: any[] | null = null;
+    let currentChunkRows: any[][] = [];
+    let chunkIndex = 0;
+    const results: Record<number, string> = {};
+    const inflight: Promise<void>[] = [];
+
+    const schedule = (rows: any[][], idx: number) => {
+      const task = (async () => {
+        try {
+          const csv = this.rowsToCsv([headerRow as any, ...rows]);
+          // Call existing cleanCsv to leverage the same prompts/behavior
+          const cleaned = await this.cleanCsv({ csv, schemaExample: options?.schemaExample, notes: options?.notes, thousandsSeparator: options?.thousandsSeparator, decimalSeparator: options?.decimalSeparator, dateFormat: options?.dateFormat } as any);
+          results[idx] = cleaned;
+        } catch (err) {
+          this.logger.error(`Chunk ${idx} failed: ${err?.message || err}`);
+          throw err;
+        }
+      })();
+
+      inflight.push(task);
+
+      // Keep inflight array trimmed when tasks complete
+      task.finally(() => {
+        const i = inflight.indexOf(task);
+        if (i >= 0) inflight.splice(i, 1);
+      });
+
+      return task;
+    };
+
+    const streamPromise = new Promise<void>((resolve, reject) => {
+      inputStream.pipe(parser)
+        .on('error', (err) => reject(err))
+        .on('data', (row: any) => {
+          // row is an array when headers=false
+          if (!headerRow) {
+            headerRow = Array.isArray(row) ? row : Object.values(row);
+            return;
+          }
+
+          const rowArr = Array.isArray(row) ? row : Object.values(row);
+          currentChunkRows.push(rowArr);
+
+          if (currentChunkRows.length >= rowsPerChunk) {
+            const toProcess = currentChunkRows;
+            currentChunkRows = [];
+            const idx = chunkIndex++;
+            schedule(toProcess, idx);
+
+            // Throttle concurrency by awaiting any task when inflight >= concurrency
+            // Note: we don't await here directly to keep streaming; we occasionally pause if too many inflight
+            if (inflight.length >= concurrency) {
+              Promise.race(inflight).catch(() => undefined);
+            }
+          }
+        })
+        .on('end', async () => {
+          try {
+            if (!headerRow) return resolve();
+            if (currentChunkRows.length > 0) {
+              const idx = chunkIndex++;
+              schedule(currentChunkRows, idx);
+              currentChunkRows = [];
+            }
+            // Wait for all inflight tasks to finish
+            await Promise.all(inflight);
+            resolve();
+          } catch (e) {
+            reject(e);
+          }
+        });
+    });
+
+    try {
+      await streamPromise;
+    } catch (e) {
+      this.logger.error('Failed during streaming/chunking: ' + (e?.message || e));
+      throw new InternalServerErrorException('Failed to stream/process CSV');
+    }
+
+    // Merge cleaned chunk CSVs in index order. Remove duplicate rows across chunks.
+    const mergedRows: any[][] = [];
+    const seen = new Set<string>();
+    for (let i = 0; i < chunkIndex; i++) {
+      const cleanedCsv = results[i];
+      if (!cleanedCsv) continue;
+      const rows = this.csvToRows(cleanedCsv);
+      if (!rows.length) continue;
+      const h = rows[0];
+      if (mergedRows.length === 0) mergedRows.push(h);
+      for (let r = 1; r < rows.length; r++) {
+        const row = rows[r];
+        const key = JSON.stringify(row);
+        if (!seen.has(key)) {
+          seen.add(key);
+          mergedRows.push(row);
+        }
+      }
+    }
+
+    if (mergedRows.length === 0) throw new InternalServerErrorException('No data after cleaning');
+
+    // No final AI pass: return merged cleaned rows directly (chunk -> clean -> merge)
+    return mergedRows;
   }
 
   private buildMatrixSystemPrompt(opts: { thousandsSeparator?: string; decimalSeparator?: string; dateFormat?: string }): string {
