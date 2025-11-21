@@ -80,7 +80,8 @@ export class AiController {
     @UploadedFile() file: any,
     @Body() body: Omit<CleanExcelUploadDto, 'file'>,
   ) {
-    const result = await this.aiService.cleanExcelToMatrix({ file, options: body });
+
+    const result = await this.aiService.cleanLargeCsvToMatrix({ file, options: body });
     return result;
   }
 }
