@@ -6,11 +6,14 @@ import * as fs from 'fs';
 import { CleanCsvDto } from './dto/clean-csv.dto';
 import { parse } from 'fast-csv';
 import { Readable } from 'stream';
+import { parse } from 'fast-csv';
+import { Readable } from 'stream';
 
 @Injectable()
 export class AiService {
   private readonly logger = new Logger(AiService.name);
   private readonly baseUrl = 'https://openrouter.ai/api/v1';
+  private readonly model = 'google/gemini-2.5-flash-lite';
   private readonly model = 'google/gemini-2.5-flash-lite';
   private readonly apiKey: string;
 
@@ -95,6 +98,56 @@ export class AiService {
       throw new InternalServerErrorException('AI service is not configured');
     }
 
+    // Helper: estimate tokens roughly (approx 4 chars per token)
+    const estimateTokens = (text: string) => Math.ceil((text?.length || 0) / 4);
+    const MAX_INPUT_TOKENS = 20000; // keep well below provider limit (e.g., 128k)
+
+    // concise system prompt used for chunked requests (much shorter to save context)
+    const buildConciseSystemPrompt = (payload?: Partial<CleanCsvDto>) => {
+      const parts: string[] = [
+        'You are a CSV cleaning assistant. Output ONLY cleaned CSV with header. No explanations, no markdown.',
+        'Trim whitespace, normalize quotes, remove exact duplicate rows, leave unfixable cells empty.',
+        'For numeric/date columns try to normalize formats; do not invent data. Escape quotes and commas per RFC4180.',
+      ];
+      if (payload?.dateFormat) parts.push(`Use date format: ${payload.dateFormat}`);
+      return parts.join(' ');
+    };
+
+    // Direct send to API for a single CSV text
+    const sendCleanRequest = async (csvText: string, opts?: Partial<CleanCsvDto>, useShortPrompt = false): Promise<string> => {
+      const sysPrompt = useShortPrompt ? buildConciseSystemPrompt(opts) : this.buildSystemPrompt(opts as CleanCsvDto);
+      const userPrompt = ['Original CSV:', csvText].join('\n\n');
+
+      // Pre-send guards: ensure we never send a request exceeding safe token/char limits.
+      const MAX_CHARS_PER_REQUEST = 250_000; // character guard (~60k tokens conservative)
+      const estTokens = estimateTokens(sysPrompt + '\n' + userPrompt);
+      if (userPrompt.length > MAX_CHARS_PER_REQUEST || estTokens > MAX_INPUT_TOKENS) {
+        this.logger.error(`Refusing to send oversized request: chars=${userPrompt.length}, estTokens=${estTokens}`);
+        throw new InternalServerErrorException('CSV chunk too large for AI model; please reduce rowsPerChunk or use streaming/chunked endpoint');
+      }
+
+      const body = {
+        model: this.model,
+        messages: [
+          { role: 'system', content: sysPrompt },
+          { role: 'user', content: userPrompt },
+        ],
+        temperature: 0,
+      } as const;
+      const url = `${this.baseUrl}/chat/completions`;
+
+      // Retry/backoff parameters
+      const maxRetries = 4;
+      let attempt = 0;
+
+      while (attempt <= maxRetries) {
+        attempt++;
+        try {
+          const res = await fetch(url, {
+            method: 'POST',
+            headers: this.getCommonHeaders(this.apiKey),
+            body: JSON.stringify(body),
+          });
     // Helper: estimate tokens roughly (approx 4 chars per token)
     const estimateTokens = (text: string) => Math.ceil((text?.length || 0) / 4);
     const MAX_INPUT_TOKENS = 20000; // keep well below provider limit (e.g., 128k)
