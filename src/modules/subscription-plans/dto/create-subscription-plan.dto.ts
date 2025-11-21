@@ -44,7 +44,6 @@ export class CreateSubscriptionPlanDto {
 
     @ApiProperty({ example: 29.99 })
     @IsNumber()
-    @IsPositive()
     price: number;
 
     @ApiProperty({ example: "USD", required: false })
@@ -73,14 +72,4 @@ export class CreateSubscriptionPlanDto {
     @IsOptional()
     @IsBoolean()
     isActive?: boolean;
-
-    @ApiProperty({ example: 1, required: false })
-    @IsOptional()
-    @IsNumber()
-    sortOrder?: number;
-
-    @ApiProperty({ example: "price_12345", required: false, description: "Stripe Price ID for integration" })
-    @IsOptional()
-    @IsString()
-    stripePriceId?: string;
 }

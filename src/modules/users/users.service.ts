@@ -13,10 +13,12 @@ import { User, UserWithoutPassword } from "../../types/user.types";
 import * as bcrypt from "bcryptjs";
 import { ChangePasswordDTO } from "./dto/change-password.dto";
 import { Messages } from "src/constant/message-config";
+import { AppConstants } from "src/constant/app.constants";
 
 @Injectable()
 export class UsersService {
   private readonly logger = new Logger(UsersService.name);
+  private cachedDefaultPlanId?: string;
 
   constructor(private prismaService: PrismaService, private activityService: ActivityService) { }
 
@@ -26,12 +28,20 @@ export class UsersService {
       ? await bcrypt.hash(createUserDto.password, 10)
       : null;
 
+    const defaultPlanId = await this.getDefaultSubscriptionPlanId();
+
+    const data = {
+      ...createUserDto,
+      password: hashedPassword ?? undefined,
+      role: createUserDto.role || UserRole.USER,
+    };
+
+    if (!data.subscriptionPlanId && defaultPlanId) {
+      data.subscriptionPlanId = defaultPlanId;
+    }
+
     const user = await this.prismaService.prisma.user.create({
-      data: {
-        ...createUserDto,
-        password: hashedPassword,
-        role: createUserDto.role || UserRole.USER,
-      },
+      data,
     });
 
     return user as User;
@@ -267,5 +277,29 @@ export class UsersService {
       this.logger.error('Failed to lock/unlock user:', error);
       throw error;
     }
+  }
+
+  private async getDefaultSubscriptionPlanId(): Promise<string | null> {
+    if (this.cachedDefaultPlanId) {
+      return this.cachedDefaultPlanId;
+    }
+
+    const planName = AppConstants.DEFAULT_SUBSCRIPTION_PLAN_NAME;
+    if (!planName) {
+      return null;
+    }
+
+    const plan = await this.prismaService.prisma.subscriptionPlan.findFirst({
+      where: { name: planName, isActive: true },
+      select: { id: true },
+    });
+
+    if (!plan) {
+      this.logger.warn(`Default subscription plan "${planName}" not found or inactive.`);
+      return null;
+    }
+
+    this.cachedDefaultPlanId = plan.id;
+    return plan.id;
   }
 }

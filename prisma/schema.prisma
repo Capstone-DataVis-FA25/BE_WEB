@@ -119,10 +119,8 @@ model SubscriptionPlan {
   features    String[]   // List of features included in this plan
   limits      Json?      // Usage limits (e.g., max datasets, max charts, etc.)
   isActive    Boolean    @default(true)
-  sortOrder   Int        @default(0)
   createdAt   DateTime   @default(now())
   updatedAt   DateTime   @updatedAt
-  stripePriceId String?   // For integration with Stripe (optional)
   users       User[]
   paymentTransactions PaymentTransaction[]
 }

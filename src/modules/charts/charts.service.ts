@@ -15,6 +15,7 @@ import { DatasetsService } from "@modules/datasets/datasets.service";
 import { parseChartSpecificConfig } from "./helpers/chart-config.helper";
 import { Messages } from "src/constant/message-config";
 import { ChartHistoryService } from "@modules/chart-history/chart-history.service";
+import { SubscriptionPlansService } from "../subscription-plans/subscription-plans.service";
 import * as moment from 'moment-timezone';
 
 @Injectable()
@@ -22,9 +23,10 @@ export class ChartsService {
   constructor(
     private readonly prismaService: PrismaService,
     private readonly datasetService: DatasetsService,
+    private readonly subscriptionPlansService: SubscriptionPlansService,
     @Inject(forwardRef(() => ChartHistoryService))
     private readonly chartHistoryService: ChartHistoryService,
-  ) {}
+  ) { }
 
   async findAll(userId: string) {
     try {
@@ -187,13 +189,13 @@ export class ChartsService {
 
       // Extract imageUrl from updateChartDto if provided
       const { imageUrl, ...updateData } = updateChartDto as any;
-      
+
       // Tạo snapshot lịch sử trước khi update (lưu ảnh chart CŨ vào history)
       const currentChart = await this.prismaService.prisma.chart.findUnique({
         where: { id },
         select: { imageUrl: true },
       });
-      
+
       await this.chartHistoryService.createHistorySnapshot(
         id,
         userId,
@@ -228,7 +230,7 @@ export class ChartsService {
           },
         },
       });
-      return {updatedChart, message: Messages.CHART_UPDATE_SUCCESS};
+      return { updatedChart, message: Messages.CHART_UPDATE_SUCCESS };
     } catch (error) {
       if (
         error instanceof NotFoundException ||
