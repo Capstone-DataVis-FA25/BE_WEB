@@ -89,13 +89,13 @@ export class ChartsService {
       const chart = await this.prismaService.prisma.chart.findUnique({
         where: { id },
         include: {
-          dataset: {
-            include: {
-              headers: {
-                orderBy: { index: "asc" },
-              },
-            },
-          },
+          // dataset: {
+          //   include: {
+          //     headers: {
+          //       orderBy: { index: "asc" },
+          //     },
+          //   },
+          // },
           user: {
             select: {
               id: true,
