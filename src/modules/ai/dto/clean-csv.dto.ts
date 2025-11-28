@@ -8,7 +8,7 @@ export class CleanCsvDto {
   })
   @IsString()
   @IsNotEmpty()
-  @MaxLength(500_000, { message: 'CSV too large' })
+  @MaxLength(50000000, { message: 'CSV too large' })
   csv: string;
 
   @ApiPropertyOptional({ description: 'Thousands separator', example: ',' })
@@ -43,4 +43,10 @@ export class CleanCsvDto {
   @IsString()
   @MaxLength(5_000)
   notes?: string;
+
+  @ApiPropertyOptional({ description: 'User ID thực hiện clean (dùng cho async job)', example: 'user-123' })
+  @IsOptional()
+  @IsString()
+  @MaxLength(100)
+  userId?: string;
 }

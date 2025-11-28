@@ -9,7 +9,7 @@ import { CleanCsvDto } from './dto/clean-csv.dto';
 export class AiService {
   private readonly logger = new Logger(AiService.name);
   private readonly baseUrl = 'https://openrouter.ai/api/v1';
-  private readonly model = 'openai/gpt-4o-mini';
+  private readonly model = 'google/gemma-3-27b-it:free';
   private readonly apiKey: string;
 
   constructor(private readonly configService: ConfigService) {
@@ -93,6 +93,61 @@ export class AiService {
       throw new InternalServerErrorException('AI service is not configured');
     }
 
+    // CHUNKING LOGIC
+    const lines = payload.csv.split(/\r?\n/).filter(l => l.trim() !== '');
+    const header = lines[0];
+    const dataLines = lines.slice(1);
+    const CHUNK_SIZE = 500; // adjust as needed (tokens per chunk)
+    if (dataLines.length > CHUNK_SIZE) {
+      let allMatrix: any[][] = [];
+      for (let i = 0; i < dataLines.length; i += CHUNK_SIZE) {
+        const chunkLines = [header, ...dataLines.slice(i, i + CHUNK_SIZE)];
+        const chunkPayload = { ...payload, csv: chunkLines.join('\n') };
+        const systemPrompt = this.buildSystemPrompt(chunkPayload);
+        const body = {
+          model: this.model,
+          messages: [
+            { role: 'system', content: systemPrompt },
+            { role: 'user', content: this.buildUserPrompt(chunkPayload) },
+          ],
+          temperature: 0,
+        } as const;
+        const url = `${this.baseUrl}/chat/completions`;
+        const res = await fetch(url, {
+          method: 'POST',
+          headers: this.getCommonHeaders(this.apiKey),
+          body: JSON.stringify(body),
+        });
+        if (!res.ok) {
+          const text = await res.text().catch(() => '');
+          this.logger.error(`OpenRouter API error: ${res.status} ${res.statusText} ${text}`);
+          throw new InternalServerErrorException('Failed to clean CSV (chunk)');
+        }
+        const data = await res.json();
+        const content = data?.choices?.[0]?.message?.content?.trim();
+        if (!content) {
+          this.logger.error('OpenRouter API returned no content (chunk)');
+          throw new InternalServerErrorException('AI returned empty response (chunk)');
+        }
+        const matrix = this.tryParseJsonMatrix(content);
+        if (!matrix || !matrix.length) {
+          this.logger.error('AI returned invalid matrix JSON (chunk)');
+          throw new InternalServerErrorException('AI returned invalid matrix JSON (chunk)');
+        }
+        // For first chunk, keep header; for next, skip header row
+        if (allMatrix.length === 0) {
+          allMatrix = matrix;
+        } else {
+          allMatrix.push(...matrix.slice(1));
+        }
+      }
+      return {
+        data: allMatrix,
+        rowCount: allMatrix.length,
+        columnCount: allMatrix[0]?.length || 0,
+      };
+    }
+    // ...existing code for small CSV...
     const systemPrompt = this.buildSystemPrompt(payload);
     const body = {
       model: this.model,
