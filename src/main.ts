@@ -50,8 +50,8 @@ async function bootstrap() {
 	app.useGlobalInterceptors(new ResponseInterceptor(), new LoggingInterceptor());
 
 	// Increased payload limits
-	app.use(json({ limit: "15mb" }));
-	app.use(urlencoded({ extended: true, limit: "15mb" }));
+	app.use(json({ limit: "50mb" }));
+	app.use(urlencoded({ extended: true, limit: "50mb" }));
 
 	await app.listen(port, () =>
 		logger.log(`🚀 Server running on: http://localhost:${port}/api-docs`)
