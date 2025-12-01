@@ -1,5 +1,4 @@
 import { Injectable, InternalServerErrorException, Logger, BadRequestException } from '@nestjs/common';
-import type { Multer } from 'multer';
 import { ConfigService } from '@nestjs/config';
 import * as XLSX from 'xlsx';
 import * as fs from 'fs';
@@ -9,7 +8,7 @@ import { CleanCsvDto } from './dto/clean-csv.dto';
 export class AiService {
   private readonly logger = new Logger(AiService.name);
   private readonly baseUrl = 'https://openrouter.ai/api/v1';
-  private readonly model = 'google/gemma-3-27b-it:free';
+  private readonly model = 'google/gemini-2.5-flash-lite-preview-09-2025';
   private readonly apiKey: string;
 
   constructor(private readonly configService: ConfigService) {
@@ -93,15 +92,19 @@ export class AiService {
       throw new InternalServerErrorException('AI service is not configured');
     }
 
-    // CHUNKING LOGIC
+    // CHUNKING LOGIC (parallel processing with concurrency limit)
     const lines = payload.csv.split(/\r?\n/).filter(l => l.trim() !== '');
     const header = lines[0];
     const dataLines = lines.slice(1);
-    const CHUNK_SIZE = 500; // adjust as needed (tokens per chunk)
+    const CHUNK_SIZE = 200; // adjust as needed (rows per chunk)
+    const MAX_CONCURRENT = 3; // parallel requests limit to avoid rate-limit
+
     if (dataLines.length > CHUNK_SIZE) {
-      let allMatrix: any[][] = [];
-      for (let i = 0; i < dataLines.length; i += CHUNK_SIZE) {
-        const chunkLines = [header, ...dataLines.slice(i, i + CHUNK_SIZE)];
+      this.logger.log(`CSV has ${dataLines.length} rows, splitting into chunks of ${CHUNK_SIZE} (concurrency: ${MAX_CONCURRENT})`);
+      
+      // Helper to process one chunk
+      const processChunk = async (chunkIndex: number, startRow: number): Promise<any[][]> => {
+        const chunkLines = [header, ...dataLines.slice(startRow, startRow + CHUNK_SIZE)];
         const chunkPayload = { ...payload, csv: chunkLines.join('\n') };
         const systemPrompt = this.buildSystemPrompt(chunkPayload);
         const body = {
@@ -111,36 +114,92 @@ export class AiService {
             { role: 'user', content: this.buildUserPrompt(chunkPayload) },
           ],
           temperature: 0,
-        } as const;
+          max_tokens: 16000,
+          response_format: {
+            type: 'json_schema',
+            json_schema: {
+              name: 'cleaned_data',
+              strict: true,
+              schema: {
+                type: 'object',
+                properties: {
+                  data: {
+                    type: 'array',
+                    items: {
+                      type: 'array',
+                      items: { type: 'string' },
+                    },
+                  },
+                },
+                required: ['data'],
+                additionalProperties: false,
+              },
+            },
+          },
+        };
         const url = `${this.baseUrl}/chat/completions`;
+        
+        this.logger.log(`Chunk ${chunkIndex}: sending ${chunkLines.length - 1} rows to AI...`);
+        const start = Date.now();
         const res = await fetch(url, {
           method: 'POST',
           headers: this.getCommonHeaders(this.apiKey),
           body: JSON.stringify(body),
         });
+        
         if (!res.ok) {
           const text = await res.text().catch(() => '');
-          this.logger.error(`OpenRouter API error: ${res.status} ${res.statusText} ${text}`);
-          throw new InternalServerErrorException('Failed to clean CSV (chunk)');
+          this.logger.error(`Chunk ${chunkIndex} failed: ${res.status} ${res.statusText} ${text}`);
+          throw new InternalServerErrorException(`Failed to clean CSV chunk ${chunkIndex}`);
         }
+        
         const data = await res.json();
         const content = data?.choices?.[0]?.message?.content?.trim();
         if (!content) {
-          this.logger.error('OpenRouter API returned no content (chunk)');
-          throw new InternalServerErrorException('AI returned empty response (chunk)');
+          this.logger.error(`Chunk ${chunkIndex}: AI returned no content`);
+          throw new InternalServerErrorException(`AI returned empty response for chunk ${chunkIndex}`);
         }
-        const matrix = this.tryParseJsonMatrix(content);
+        
+        let matrix: any[][] | null = null;
+        try {
+          const parsed = JSON.parse(content);
+          matrix = parsed?.data || null;
+        } catch {
+          matrix = this.tryParseJsonMatrix(content);
+        }
+        
         if (!matrix || !matrix.length) {
-          this.logger.error('AI returned invalid matrix JSON (chunk)');
-          throw new InternalServerErrorException('AI returned invalid matrix JSON (chunk)');
+          this.logger.error(`Chunk ${chunkIndex}: AI returned invalid matrix JSON. Content (first 500 chars): ${content.substring(0, 500)}`);
+          throw new InternalServerErrorException(`AI returned invalid matrix JSON for chunk ${chunkIndex}`);
         }
-        // For first chunk, keep header; for next, skip header row
-        if (allMatrix.length === 0) {
-          allMatrix = matrix;
-        } else {
-          allMatrix.push(...matrix.slice(1));
-        }
+        
+        this.logger.log(`Chunk ${chunkIndex}: completed in ${Date.now() - start}ms, got ${matrix.length} rows`);
+        return matrix;
+      };
+
+      // Process chunks with concurrency limit
+      const chunks: Array<{ index: number; startRow: number }> = [];
+      for (let i = 0; i < dataLines.length; i += CHUNK_SIZE) {
+        chunks.push({ index: chunks.length, startRow: i });
       }
+
+      const results: any[][] = [];
+      for (let i = 0; i < chunks.length; i += MAX_CONCURRENT) {
+        const batch = chunks.slice(i, i + MAX_CONCURRENT);
+        this.logger.log(`Processing batch ${Math.floor(i / MAX_CONCURRENT) + 1}/${Math.ceil(chunks.length / MAX_CONCURRENT)} (chunks ${batch[0].index}-${batch[batch.length - 1].index})`);
+        const batchResults = await Promise.all(
+          batch.map(c => processChunk(c.index, c.startRow))
+        );
+        results.push(...batchResults);
+      }
+
+      // Merge results (keep header from first chunk, skip header rows in subsequent chunks)
+      let allMatrix: any[][] = results[0] || [];
+      for (let i = 1; i < results.length; i++) {
+        allMatrix.push(...results[i].slice(1)); // skip header row
+      }
+
+      this.logger.log(`All chunks processed, total rows: ${allMatrix.length}`);
       return {
         data: allMatrix,
         rowCount: allMatrix.length,
@@ -156,7 +215,29 @@ export class AiService {
         { role: 'user', content: this.buildUserPrompt(payload) },
       ],
       temperature: 0,
-    } as const;
+      max_tokens: 16000,
+      response_format: {
+        type: 'json_schema',
+        json_schema: {
+          name: 'cleaned_data',
+          strict: true,
+          schema: {
+            type: 'object',
+            properties: {
+              data: {
+                type: 'array',
+                items: {
+                  type: 'array',
+                  items: { type: 'string' },
+                },
+              },
+            },
+            required: ['data'],
+            additionalProperties: false,
+          },
+        },
+      },
+    };
 
     const url = `${this.baseUrl}/chat/completions`;
     const res = await fetch(url, {
@@ -178,8 +259,15 @@ export class AiService {
       throw new InternalServerErrorException('AI returned empty response');
     }
 
-    // Parse AI response as JSON matrix instead of CSV
-    const matrix = this.tryParseJsonMatrix(content);
+    // Parse AI response as JSON matrix from structured output
+    let matrix: any[][] | null = null;
+    try {
+      const parsed = JSON.parse(content);
+      matrix = parsed?.data || null;
+    } catch {
+      matrix = this.tryParseJsonMatrix(content);
+    }
+    
     if (!matrix || !matrix.length) {
       this.logger.error('AI returned invalid matrix JSON');
       throw new InternalServerErrorException('AI returned invalid matrix JSON');
@@ -195,8 +283,9 @@ export class AiService {
   private buildSystemPrompt(payload: CleanCsvDto): string {
     const rules: string[] = [
       'You are a strict data cleaner for tabular data.',
-      'Output must be ONLY a valid JSON array of arrays (2D matrix). No markdown, no code fences, no extra text.',
-      'The first inner array must be the header row.',
+      'Output must be a JSON object with format: {"data": [[row1], [row2], ...]}',
+      'The "data" field contains a 2D array where the first inner array is the header row.',
+      'No markdown, no code fences, no extra text outside the JSON object.',
       
       '## Duplicate Handling:',
       '- Remove exact duplicate rows (keep only the first occurrence).',
@@ -227,7 +316,7 @@ export class AiService {
       '- Ensure Boolean-like columns use consistent values (e.g., "Yes"/"No" or "1"/"0").',
       
       'Do not invent data. If a value cannot be deterministically fixed, use empty string.',
-      'Return ONLY valid JSON array of arrays, no other text.',
+      'Return ONLY valid JSON object with format: {"data": [[...], [...], ...]}',
     ];
     
     if (payload.schemaExample) {
@@ -250,7 +339,7 @@ export class AiService {
     if (payload.notes) preface.push(`Notes: ${payload.notes}`);
     if (payload.schemaExample) preface.push('CSV Schema Example:\n' + payload.schemaExample);
     preface.push('Original CSV:\n' + payload.csv);
-    preface.push('Return only the cleaned data as a JSON array of arrays (2D matrix). First array is the header row.');
+    preface.push('Return cleaned data as JSON: {"data": [[header], [row1], [row2], ...]}');
     return preface.join('\n\n');
   }
 
@@ -267,9 +356,155 @@ export class AiService {
       throw new InternalServerErrorException('AI service is not configured');
     }
 
+    // CHUNKING LOGIC (parallel processing with concurrency limit)
+    const lines = csv.split(/\r?\n/).filter(l => l.trim() !== '');
+    const header = lines[0];
+    const dataLines = lines.slice(1);
+    const CHUNK_SIZE = 200; // adjust as needed (rows per chunk)
+    const MAX_CONCURRENT = 3; // parallel requests limit to avoid rate-limit
+
+    if (dataLines.length > CHUNK_SIZE) {
+      this.logger.log(`Excel has ${dataLines.length} rows, splitting into chunks of ${CHUNK_SIZE} (concurrency: ${MAX_CONCURRENT})`);
+      
+      // Helper to process one chunk
+      const processChunk = async (chunkIndex: number, startRow: number): Promise<any[][]> => {
+        const chunkLines = [header, ...dataLines.slice(startRow, startRow + CHUNK_SIZE)];
+        const chunkCsv = chunkLines.join('\n');
+        const systemPrompt = this.buildMatrixSystemPrompt(options || {});
+        const userPrompt = this.buildMatrixUserPrompt({ csv: chunkCsv, options: options || {} });
+        const body = {
+          model: this.model,
+          messages: [
+            { role: 'system', content: systemPrompt },
+            { role: 'user', content: userPrompt },
+          ],
+          temperature: 0,
+          max_tokens: 16000,
+          response_format: {
+            type: 'json_schema',
+            json_schema: {
+              name: 'cleaned_data',
+              strict: true,
+              schema: {
+                type: 'object',
+                properties: {
+                  data: {
+                    type: 'array',
+                    items: {
+                      type: 'array',
+                      items: { type: 'string' },
+                    },
+                  },
+                },
+                required: ['data'],
+                additionalProperties: false,
+              },
+            },
+          },
+        };
+        const url = `${this.baseUrl}/chat/completions`;
+        
+        this.logger.log(`Excel Chunk ${chunkIndex}: sending ${chunkLines.length - 1} rows to AI...`);
+        const start = Date.now();
+        const res = await fetch(url, {
+          method: 'POST',
+          headers: this.getCommonHeaders(this.apiKey),
+          body: JSON.stringify(body),
+        });
+        
+        if (!res.ok) {
+          const text = await res.text().catch(() => '');
+          this.logger.error(`Excel Chunk ${chunkIndex} failed: ${res.status} ${res.statusText} ${text}`);
+          throw new InternalServerErrorException(`Failed to clean Excel chunk ${chunkIndex}`);
+        }
+        
+        const data = await res.json();
+        const content = data?.choices?.[0]?.message?.content?.trim();
+        if (!content) {
+          this.logger.error(`Excel Chunk ${chunkIndex}: AI returned no content`);
+          throw new InternalServerErrorException(`AI returned empty response for Excel chunk ${chunkIndex}`);
+        }
+        
+        let matrix: any[][] | null = null;
+        try {
+          const parsed = JSON.parse(content);
+          matrix = parsed?.data || null;
+        } catch {
+          matrix = this.tryParseJsonMatrix(content);
+        }
+        
+        if (!matrix || !matrix.length) {
+          this.logger.error(`Excel Chunk ${chunkIndex}: AI returned invalid matrix JSON. Content (first 500 chars): ${content.substring(0, 500)}`);
+          throw new InternalServerErrorException(`AI returned invalid matrix JSON for Excel chunk ${chunkIndex}`);
+        }
+        
+        this.logger.log(`Excel Chunk ${chunkIndex}: completed in ${Date.now() - start}ms, got ${matrix.length} rows`);
+        return matrix;
+      };
+
+      // Process chunks with concurrency limit
+      const chunks: Array<{ index: number; startRow: number }> = [];
+      for (let i = 0; i < dataLines.length; i += CHUNK_SIZE) {
+        chunks.push({ index: chunks.length, startRow: i });
+      }
+
+      const results: any[][] = [];
+      for (let i = 0; i < chunks.length; i += MAX_CONCURRENT) {
+        const batch = chunks.slice(i, i + MAX_CONCURRENT);
+        this.logger.log(`Excel Processing batch ${Math.floor(i / MAX_CONCURRENT) + 1}/${Math.ceil(chunks.length / MAX_CONCURRENT)} (chunks ${batch[0].index}-${batch[batch.length - 1].index})`);
+        const batchResults = await Promise.all(
+          batch.map(c => processChunk(c.index, c.startRow))
+        );
+        results.push(...batchResults);
+      }
+
+      // Merge results (keep header from first chunk, skip header rows in subsequent chunks)
+      let allMatrix: any[][] = results[0] || [];
+      for (let i = 1; i < results.length; i++) {
+        allMatrix.push(...results[i].slice(1)); // skip header row
+      }
+
+      this.logger.log(`Excel All chunks processed, total rows: ${allMatrix.length}`);
+      return {
+        data: allMatrix,
+        rowCount: allMatrix.length,
+        columnCount: allMatrix[0]?.length || 0,
+      };
+    }
+
+    // Small file - process in one shot
     const systemPrompt = this.buildMatrixSystemPrompt(options || {});
     const userPrompt = this.buildMatrixUserPrompt({ csv, options: options || {} });
-    const body = { model: this.model, messages: [{ role: 'system', content: systemPrompt }, { role: 'user', content: userPrompt }], temperature: 0 } as const;
+    const body = {
+      model: this.model,
+      messages: [
+        { role: 'system', content: systemPrompt },
+        { role: 'user', content: userPrompt },
+      ],
+      temperature: 0,
+      max_tokens: 16000,
+      response_format: {
+        type: 'json_schema',
+        json_schema: {
+          name: 'cleaned_data',
+          strict: true,
+          schema: {
+            type: 'object',
+            properties: {
+              data: {
+                type: 'array',
+                items: {
+                  type: 'array',
+                  items: { type: 'string' },
+                },
+              },
+            },
+            required: ['data'],
+            additionalProperties: false,
+          },
+        },
+      },
+    };
     const url = `${this.baseUrl}/chat/completions`;
 
     const res = await fetch(url, {
@@ -286,7 +521,15 @@ export class AiService {
 
     const data = await res.json();
     const content = data?.choices?.[0]?.message?.content ?? '';
-    const matrix = this.tryParseJsonMatrix(content);
+    
+    let matrix: any[][] | null = null;
+    try {
+      const parsed = JSON.parse(content);
+      matrix = parsed?.data || null;
+    } catch {
+      matrix = this.tryParseJsonMatrix(content);
+    }
+    
     if (!matrix || !matrix.length) {
       this.logger.error('AI returned invalid matrix JSON');
       throw new InternalServerErrorException('AI returned invalid matrix JSON');
@@ -400,8 +643,9 @@ export class AiService {
   private buildMatrixSystemPrompt(opts: { thousandsSeparator?: string; decimalSeparator?: string; dateFormat?: string }): string {
     const rules: string[] = [
       'You are a strict data cleaner for tabular data.',
-      'Output must be ONLY a valid JSON array of arrays (2D matrix). No markdown, no code fences, no extra text.',
-      'The first inner array must be the header row.',
+      'Output must be a JSON object with format: {"data": [[row1], [row2], ...]}',
+      'The "data" field contains a 2D array where the first inner array is the header row.',
+      'No markdown, no code fences, no extra text outside the JSON object.',
       
       '## Duplicate Handling:',
       '- Remove exact duplicate rows (compare all columns, keep first occurrence).',
@@ -442,7 +686,7 @@ export class AiService {
       rules.push(`Convert all date-like values to this exact date format: ${opts.dateFormat}.`);
     }
     
-    rules.push('Ensure the output is valid JSON and nothing else.');
+    rules.push('Ensure the output is a valid JSON object: {"data": [[...], [...], ...]}');
     return rules.join('\n');
   }
 
@@ -452,7 +696,7 @@ export class AiService {
     if (options.notes) parts.push(`Notes: ${options.notes}`);
     if (options.schemaExample) parts.push('CSV Schema Example (desired):\n' + options.schemaExample);
     parts.push('Original CSV extracted from the uploaded file:\n' + csv);
-    parts.push('Return only the cleaned matrix as JSON array of arrays.');
+    parts.push('Return cleaned data as JSON: {"data": [[header], [row1], [row2], ...]}');
     return parts.join('\n\n');
   }
 

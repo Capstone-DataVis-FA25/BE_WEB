@@ -1,5 +1,5 @@
 import { Controller, Post, Body, HttpException, HttpStatus, UploadedFile, UseInterceptors, HttpCode, Query, Get, Req } from '@nestjs/common';
-import { ApiBody, ApiConsumes, ApiOkResponse, ApiOperation, ApiTags } from '@nestjs/swagger';
+import { ApiBody, ApiConsumes, ApiOkResponse, ApiOperation, ApiTags, ApiQuery, ApiBearerAuth } from '@nestjs/swagger';
 import { FileInterceptor } from '@nestjs/platform-express';
 import { diskStorage } from 'multer';
 import { AiService } from '@modules/ai/ai.service';
@@ -9,6 +9,7 @@ import { ChatWithAiDto } from './dto/chat-with-ai.dto';
 import { AiCleanJobService } from './ai.clean.job';
 
 @ApiTags('ai')
+@ApiBearerAuth()
 @Controller('ai')
 export class AiController {
   constructor(
@@ -98,7 +99,6 @@ export class AiController {
   @ApiOperation({ summary: 'Clean CSV data async, return jobId, notify user when done' })
   @ApiOkResponse({ description: 'Job started', schema: { type: 'object', properties: { jobId: { type: 'string' } } } })
   async cleanAsync(@Body() body: CleanCsvDto, @Req() req: any) {
-    // Lấy userId từ req (tuỳ auth, demo lấy từ req.body.userId hoặc req.user)
     const userId = req.user?.id || body.userId || req.body.userId;
     if (!userId) throw new HttpException('Missing userId', HttpStatus.BAD_REQUEST);
     const jobId = this.aiCleanJobService.createJob(userId, body);
@@ -134,8 +134,103 @@ export class AiController {
   ) {
     const userId = req.user?.id || body.userId || req.body?.userId;
     if (!userId) throw new HttpException('Missing userId', HttpStatus.BAD_REQUEST);
-    // Tạo payload tương tự cleanExcelToMatrix, tuỳ logic bạn có thể convert file -> csv string hoặc truyền file object
-    const jobId = this.aiCleanJobService.createJob(userId, { file, options: body });
+
+    // Đưa thêm metadata fileSize để service tính được dung lượng file đã clean
+    const payload = {
+      file,
+      options: body,
+      fileSize: typeof file?.size === 'number' ? file.size : undefined,
+      originalName: file?.originalname,
+    };
+
+    const jobId = this.aiCleanJobService.createJob(userId, payload);
     return { jobId };
+  }
+
+  // --- NEW: user-specific history & cancel endpoints ---
+
+  @Get('clean-history')
+  @ApiOperation({ summary: 'Get AI cleaning history for the current user' })
+  @ApiQuery({ name: 'userId', required: false, description: 'Optional: userId for debugging (if no auth). When authenticated, leave empty.' })
+  @ApiOkResponse({
+    description: 'List of cleaning jobs for the user',
+    schema: {
+      type: 'array',
+      items: {
+        type: 'object',
+        properties: {
+          jobId: { type: 'string' },
+          status: { type: 'string' },
+          createdAt: { type: 'string', format: 'date-time' },
+          updatedAt: { type: 'string', format: 'date-time' },
+          inputSize: { type: 'number' },
+        },
+      },
+    },
+  })
+  async getCleanHistory(@Req() req: any) {
+    const userId = req.user?.id || req.query.userId || req.body?.userId;
+    if (!userId) throw new HttpException('Missing userId', HttpStatus.BAD_REQUEST);
+    const history = this.aiCleanJobService.getUserHistory(userId);
+    return history;
+  }
+
+  @Post('clean-cancel')
+  @ApiOperation({ summary: 'Cancel a pending AI cleaning job for the current user' })
+  @ApiBody({
+    schema: {
+      type: 'object',
+      properties: {
+        jobId: { type: 'string' },
+        userId: { type: 'string', description: 'Optional: userId for debugging (if no auth). When authenticated, leave empty.' },
+      },
+      required: ['jobId'],
+    },
+  })
+  @ApiOkResponse({
+    description: 'Cancel result',
+    schema: {
+      type: 'object',
+      properties: {
+        success: { type: 'boolean' },
+      },
+    },
+  })
+  async cancelCleanJob(@Body() body: { jobId: string; userId?: string }, @Req() req: any) {
+    const jobId = body?.jobId;
+    if (!jobId) throw new HttpException('Missing jobId', HttpStatus.BAD_REQUEST);
+    const userId = req.user?.id || body?.userId || req.body?.userId || req.query?.userId;
+    if (!userId) throw new HttpException('Missing userId', HttpStatus.BAD_REQUEST);
+
+    // Optional: ensure user only cancels their own job
+    const history = this.aiCleanJobService.getUserHistory(userId);
+    const ownsJob = history.some(j => j.jobId === jobId);
+    if (!ownsJob) {
+      throw new HttpException('Job not found for this user', HttpStatus.NOT_FOUND);
+    }
+
+    const success = this.aiCleanJobService.cancelJob(jobId);
+    if (!success) {
+      throw new HttpException('Unable to cancel job (maybe already done/error)', HttpStatus.BAD_REQUEST);
+    }
+    return { success: true };
+  }
+
+  @Get('clean-jobs')
+  @ApiOperation({ summary: 'List all AI cleaning jobs (optional status filter). For debugging — not admin-protected.' })
+  @ApiQuery({ name: 'status', required: false, description: 'Optional status to filter: pending, done, error, cancelled' })
+  @ApiOkResponse({ description: 'List of jobs', schema: { type: 'array', items: { type: 'object' } } })
+  async listAllJobs(@Query('status') status?: string) {
+    const filter = status ? { status: status as any } : undefined;
+    const jobs = this.aiCleanJobService.getAllJobs(filter);
+    return { code: 200, message: 'Success', data: jobs };
+  }
+
+  @Get('clean-pending')
+  @ApiOperation({ summary: 'Return list of pending jobIds' })
+  @ApiOkResponse({ description: 'Pending jobIds', schema: { type: 'object', properties: { pending: { type: 'array', items: { type: 'string' } } } } })
+  async listPendingJobs() {
+    const ids = this.aiCleanJobService.getPendingJobIds();
+    return { code: 200, message: 'Success', data: ids };
   }
 }

@@ -44,6 +44,7 @@
     "class-transformer": "^0.5.1",
     "class-validator": "^0.14.1",
     "cloudinary": "^2.8.0",
+    "fast-csv": "^5.0.5",
     "google-auth-library": "^10.2.1",
     "handlebars": "^4.7.8",
     "ioredis": "^5.8.1",
@@ -106,5 +107,8 @@
     ],
     "coverageDirectory": "../coverage",
     "testEnvironment": "node"
+  },
+  "optionalDependencies": {
+    "@css-inline/css-inline-darwin-arm64": "^0.18.0"
   }
 }
