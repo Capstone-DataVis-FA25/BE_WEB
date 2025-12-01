@@ -127,4 +127,76 @@ export class PaymentsService {
 
         return { ok: true };
     }
+
+    // Get total revenue (all time, only COMPLETED)
+    async getTotalRevenue() {
+        const result = await this.prismaService.prisma.paymentTransaction.aggregate({
+            _sum: { amount: true },
+            where: { status: 'COMPLETED' },
+        });
+        return { totalRevenue: result._sum.amount || 0 };
+    }
+
+    // Get revenue for each day in the last 30 days (only COMPLETED)
+    async getRevenueLast30Days() {
+        const now = new Date();
+        const thirtyDaysAgo = new Date(now.getTime() - 30 * 24 * 60 * 60 * 1000);
+        // Lấy tất cả transaction COMPLETED trong 30 ngày gần nhất
+        const txs = await this.prismaService.prisma.paymentTransaction.findMany({
+            where: {
+                status: 'COMPLETED',
+                createdAt: { gte: thirtyDaysAgo },
+            },
+            select: {
+                amount: true,
+                createdAt: true,
+            },
+        });
+        // Gom nhóm theo ngày (YYYY-MM-DD)
+        const dailyMap: Record<string, number> = {};
+        for (let i = 0; i < 30; i++) {
+            const d = new Date(now.getTime() - i * 24 * 60 * 60 * 1000);
+            const key = d.toISOString().slice(0, 10);
+            dailyMap[key] = 0;
+        }
+        for (const tx of txs) {
+            const key = tx.createdAt.toISOString().slice(0, 10);
+            if (dailyMap[key] !== undefined) {
+                dailyMap[key] += tx.amount;
+            }
+        }
+        // Trả về mảng [{date, revenue}] theo thứ tự ngày tăng dần
+        const result = Object.entries(dailyMap)
+            .map(([date, revenue]) => ({ date, revenue }))
+            .sort((a, b) => a.date.localeCompare(b.date));
+        return { revenueLast30Days: result };
+    }
+
+    // List payment transactions (with pagination, filter by status only)
+    async listTransactions({ page = 1, limit = 20, status }: { page?: number; limit?: number; status?: string }) {
+        const where: any = {};
+        if (status) where.status = status;
+        const [items, total] = await Promise.all([
+            this.prismaService.prisma.paymentTransaction.findMany({
+                where,
+                orderBy: { createdAt: "desc" },
+                skip: (page - 1) * limit,
+                take: limit,
+            }),
+            this.prismaService.prisma.paymentTransaction.count({ where }),
+        ]);
+        return {
+            data: items,
+            page,
+            limit,
+            total,
+        };
+    }
+
+    // Get payment transaction detail by id
+    async getTransactionDetail(id: string) {
+        const tx = await this.prismaService.prisma.paymentTransaction.findUnique({ where: { id } });
+        if (!tx) throw new NotFoundException('Payment transaction not found');
+        return tx;
+    }
 }
