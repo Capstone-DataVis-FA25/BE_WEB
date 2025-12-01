@@ -12,6 +12,7 @@ export type User = {
   currentVerifyToken: string | null;
   currentHashedRefreshToken: string | null;
   isSocialAccount: boolean;
+  subscriptionPlan?: any;
 };
 
 export type UserWithoutPassword = Omit<

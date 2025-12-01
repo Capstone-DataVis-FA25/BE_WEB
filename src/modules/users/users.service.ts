@@ -53,6 +53,9 @@ export class UsersService {
         password: true,
         currentHashedRefreshToken: true,
         currentVerifyToken: true,
+      },
+      include: {
+        subscriptionPlan: true,
       }
     });
 
@@ -66,6 +69,9 @@ export class UsersService {
         password: true,
         currentHashedRefreshToken: true,
         currentVerifyToken: true,
+      },
+      include: {
+        subscriptionPlan: true,
       }
     });
     return user as UserWithoutPassword | null;
