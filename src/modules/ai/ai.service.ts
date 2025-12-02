@@ -24,6 +24,53 @@ export class AiService {
     };
   }
 
+  // POST to the chat/completions endpoint with simple retry/backoff for
+  // transient errors (5xx and 429). Returns parsed JSON when successful.
+  private async postChat(body: any, tag?: string): Promise<any> {
+    const url = `${this.baseUrl}/chat/completions`;
+    const maxAttempts = 3;
+    let lastErr: any = null;
+    for (let attempt = 1; attempt <= maxAttempts; attempt++) {
+      try {
+        const res = await fetch(url, {
+          method: 'POST',
+          headers: this.getCommonHeaders(this.apiKey),
+          body: JSON.stringify(body),
+        });
+        const text = await res.text().catch(() => '');
+        let data: any = null;
+        try { data = text ? JSON.parse(text) : {}; } catch { data = { rawText: text }; }
+
+        if (res.ok) return data;
+
+        // Retry on server errors and rate limits
+        if (res.status >= 500 || res.status === 429) {
+          const wait = Math.round(1000 * Math.pow(2, attempt - 1) + Math.random() * 200);
+          this.logger.warn(`${tag ?? 'postChat'} attempt ${attempt} got ${res.status} ${res.statusText}; retrying after ${wait}ms`);
+          lastErr = new Error(`${res.status} ${res.statusText} - ${text}`);
+          await new Promise((r) => setTimeout(r, wait));
+          continue;
+        }
+
+        // Non-retriable error
+        this.logger.error(`${tag ?? 'postChat'} failed: ${res.status} ${res.statusText} ${text}`);
+        throw new InternalServerErrorException(`AI API error: ${res.status} ${res.statusText}`);
+      } catch (err) {
+        lastErr = err;
+        // Network / unexpected error: retry a couple times
+        if (attempt < maxAttempts) {
+          const wait = Math.round(1000 * Math.pow(2, attempt - 1) + Math.random() * 200);
+          this.logger.warn(`${tag ?? 'postChat'} network/error attempt ${attempt}: ${err?.message ?? err}; retrying in ${wait}ms`);
+          await new Promise((r) => setTimeout(r, wait));
+          continue;
+        }
+        this.logger.error(`${tag ?? 'postChat'} fatal error: ${err?.message ?? err}`);
+        throw new InternalServerErrorException(`AI request failed: ${err?.message ?? err}`);
+      }
+    }
+    throw new InternalServerErrorException(`AI request failed after retries: ${lastErr?.message ?? lastErr}`);
+  }
+
   async chatWithAi(message?: string, messagesJson?: string, languageCode?: string) {
     const start = Date.now();
     if (!message) throw new Error('Vui lòng cung cấp message');
@@ -114,7 +161,7 @@ export class AiService {
             { role: 'user', content: this.buildUserPrompt(chunkPayload) },
           ],
           temperature: 0,
-          max_tokens: 16000,
+          max_tokens: 32000,
           response_format: {
             type: 'json_schema',
             json_schema: {
@@ -137,39 +184,31 @@ export class AiService {
             },
           },
         };
-        const url = `${this.baseUrl}/chat/completions`;
-        
         this.logger.log(`Chunk ${chunkIndex}: sending ${chunkLines.length - 1} rows to AI...`);
         const start = Date.now();
-        const res = await fetch(url, {
-          method: 'POST',
-          headers: this.getCommonHeaders(this.apiKey),
-          body: JSON.stringify(body),
-        });
-        
-        if (!res.ok) {
-          const text = await res.text().catch(() => '');
-          this.logger.error(`Chunk ${chunkIndex} failed: ${res.status} ${res.statusText} ${text}`);
-          throw new InternalServerErrorException(`Failed to clean CSV chunk ${chunkIndex}`);
-        }
-        
-        const data = await res.json();
-        const content = data?.choices?.[0]?.message?.content?.trim();
+        const data = await this.postChat(body, `CSV Chunk ${chunkIndex}`);
+        const content = this.extractAiContent(data);
         if (!content) {
-          this.logger.error(`Chunk ${chunkIndex}: AI returned no content`);
+          this.logger.error(`Chunk ${chunkIndex}: AI returned no content. Full response: ${JSON.stringify(data).slice(0, 2000)}`);
           throw new InternalServerErrorException(`AI returned empty response for chunk ${chunkIndex}`);
         }
         
         let matrix: any[][] | null = null;
         try {
           const parsed = JSON.parse(content);
-          matrix = parsed?.data || null;
-        } catch {
+          if (parsed && Array.isArray(parsed.data)) {
+            matrix = parsed.data;
+          } else {
+            this.logger.warn(`Chunk ${chunkIndex}: Parsed JSON but 'data' field is not an array. Trying fallback parse.`);
+            matrix = this.tryParseJsonMatrix(content);
+          }
+        } catch (err) {
+          this.logger.warn(`Chunk ${chunkIndex}: JSON.parse failed: ${err.message}. Content length: ${content.length}. Trying fallback parse.`);
           matrix = this.tryParseJsonMatrix(content);
         }
         
-        if (!matrix || !matrix.length) {
-          this.logger.error(`Chunk ${chunkIndex}: AI returned invalid matrix JSON. Content (first 500 chars): ${content.substring(0, 500)}`);
+        if (!matrix || !Array.isArray(matrix) || matrix.length === 0) {
+          this.logger.error(`Chunk ${chunkIndex}: AI returned invalid matrix. Content length: ${content.length}, first 500 chars: ${content.substring(0, 500)}, last 200 chars: ${content.substring(Math.max(0, content.length - 200))}`);
           throw new InternalServerErrorException(`AI returned invalid matrix JSON for chunk ${chunkIndex}`);
         }
         
@@ -215,7 +254,7 @@ export class AiService {
         { role: 'user', content: this.buildUserPrompt(payload) },
       ],
       temperature: 0,
-      max_tokens: 16000,
+      max_tokens: 32000,
       response_format: {
         type: 'json_schema',
         json_schema: {
@@ -239,23 +278,10 @@ export class AiService {
       },
     };
 
-    const url = `${this.baseUrl}/chat/completions`;
-    const res = await fetch(url, {
-      method: 'POST',
-      headers: this.getCommonHeaders(this.apiKey),
-      body: JSON.stringify(body),
-    });
-
-    if (!res.ok) {
-      const text = await res.text().catch(() => '');
-      this.logger.error(`OpenRouter API error: ${res.status} ${res.statusText} ${text}`);
-      throw new InternalServerErrorException('Failed to clean CSV');
-    }
-
-    const data = await res.json();
-    const content = data?.choices?.[0]?.message?.content?.trim();
+    const data = await this.postChat(body, 'CSV Single');
+    const content = this.extractAiContent(data);
     if (!content) {
-      this.logger.error('OpenRouter API returned no content');
+      this.logger.error('OpenRouter API returned no content. Full response: ' + JSON.stringify(data).slice(0, 2000));
       throw new InternalServerErrorException('AI returned empty response');
     }
 
@@ -302,7 +328,8 @@ export class AiService {
       '- Remove zero-width characters (U+200B, U+FEFF, etc.) and special Unicode whitespace.',
       
       '## Data Type Validation:',
-      '- For numeric columns: remove currency symbols, units, and non-numeric characters except valid separators. If result is invalid, use empty string.',
+      '- PRESERVE original number formats when possible (e.g., "16K" stays "16K", "$1,234.56" stays with same structure).',
+      '- For numeric columns: only remove invalid characters. Keep abbreviated formats (K, M, B, etc.) and percentage signs if present in original.',
       '- For date columns: attempt to parse and standardize. If unparseable, use empty string.',
       '- For text columns: remove control characters (U+0000 to U+001F except tabs/newlines), normalize quotes.',
       
@@ -324,7 +351,11 @@ export class AiService {
     }
     
     if (payload.thousandsSeparator || payload.decimalSeparator) {
-      rules.push(`For numeric columns, format with thousands separator "${payload.thousandsSeparator ?? ''}" and decimal separator "${payload.decimalSeparator ?? ''}".`);
+      const ts = payload.thousandsSeparator || ',';
+      const ds = payload.decimalSeparator || '.';
+      rules.push(`IMPORTANT: For numeric values that need standardization, use thousands separator "${ts}" and decimal separator "${ds}".`);
+      rules.push(`Example: If input is "16000" or "16,000" or "16 000", output as "16${ts}000". If input is "1234.56", output as "1${ts}234${ds}56".`);
+      rules.push(`Keep abbreviated formats: "16K" stays "16K", "1.5M" stays "1.5M", "25%" stays "25%".`);
     }
     
     if (payload.dateFormat) {
@@ -379,7 +410,7 @@ export class AiService {
             { role: 'user', content: userPrompt },
           ],
           temperature: 0,
-          max_tokens: 16000,
+          max_tokens: 32000,
           response_format: {
             type: 'json_schema',
             json_schema: {
@@ -402,39 +433,31 @@ export class AiService {
             },
           },
         };
-        const url = `${this.baseUrl}/chat/completions`;
-        
         this.logger.log(`Excel Chunk ${chunkIndex}: sending ${chunkLines.length - 1} rows to AI...`);
         const start = Date.now();
-        const res = await fetch(url, {
-          method: 'POST',
-          headers: this.getCommonHeaders(this.apiKey),
-          body: JSON.stringify(body),
-        });
-        
-        if (!res.ok) {
-          const text = await res.text().catch(() => '');
-          this.logger.error(`Excel Chunk ${chunkIndex} failed: ${res.status} ${res.statusText} ${text}`);
-          throw new InternalServerErrorException(`Failed to clean Excel chunk ${chunkIndex}`);
-        }
-        
-        const data = await res.json();
-        const content = data?.choices?.[0]?.message?.content?.trim();
-        if (!content) {
-          this.logger.error(`Excel Chunk ${chunkIndex}: AI returned no content`);
-          throw new InternalServerErrorException(`AI returned empty response for Excel chunk ${chunkIndex}`);
-        }
+        const data = await this.postChat(body, `Excel Chunk ${chunkIndex}`);
+        const content = this.extractAiContent(data);
+          if (!content) {
+            this.logger.error(`Excel Chunk ${chunkIndex}: AI returned no content. Full response: ${JSON.stringify(data).slice(0, 2000)}`);
+            throw new InternalServerErrorException(`AI returned empty response for Excel chunk ${chunkIndex}`);
+          }
         
         let matrix: any[][] | null = null;
         try {
           const parsed = JSON.parse(content);
-          matrix = parsed?.data || null;
-        } catch {
+          if (parsed && Array.isArray(parsed.data)) {
+            matrix = parsed.data;
+          } else {
+            this.logger.warn(`Excel Chunk ${chunkIndex}: Parsed JSON but 'data' field is not an array. Trying fallback parse.`);
+            matrix = this.tryParseJsonMatrix(content);
+          }
+        } catch (err) {
+          this.logger.warn(`Excel Chunk ${chunkIndex}: JSON.parse failed: ${err.message}. Content length: ${content.length}. Trying fallback parse.`);
           matrix = this.tryParseJsonMatrix(content);
         }
         
-        if (!matrix || !matrix.length) {
-          this.logger.error(`Excel Chunk ${chunkIndex}: AI returned invalid matrix JSON. Content (first 500 chars): ${content.substring(0, 500)}`);
+        if (!matrix || !Array.isArray(matrix) || matrix.length === 0) {
+          this.logger.error(`Excel Chunk ${chunkIndex}: AI returned invalid matrix. Content length: ${content.length}, first 500 chars: ${content.substring(0, 500)}, last 200 chars: ${content.substring(Math.max(0, content.length - 200))}`);
           throw new InternalServerErrorException(`AI returned invalid matrix JSON for Excel chunk ${chunkIndex}`);
         }
         
@@ -482,7 +505,7 @@ export class AiService {
         { role: 'user', content: userPrompt },
       ],
       temperature: 0,
-      max_tokens: 16000,
+      max_tokens: 32000,
       response_format: {
         type: 'json_schema',
         json_schema: {
@@ -505,22 +528,8 @@ export class AiService {
         },
       },
     };
-    const url = `${this.baseUrl}/chat/completions`;
-
-    const res = await fetch(url, {
-      method: 'POST',
-      headers: this.getCommonHeaders(this.apiKey),
-      body: JSON.stringify(body),
-    });
-
-    if (!res.ok) {
-      const text = await res.text().catch(() => '');
-      this.logger.error(`OpenRouter API error: ${res.status} ${res.statusText} ${text}`);
-      throw new InternalServerErrorException('Failed to clean Excel');
-    }
-
-    const data = await res.json();
-    const content = data?.choices?.[0]?.message?.content ?? '';
+    const data = await this.postChat(body, 'Excel Single');
+    const content = this.extractAiContent(data);
     
     let matrix: any[][] | null = null;
     try {
@@ -662,7 +671,8 @@ export class AiService {
       '- Remove zero-width characters (U+200B, U+FEFF, etc.) and control characters.',
       
       '## Data Type Validation & Coercion:',
-      '- Numeric columns: remove currency symbols ($, €, £), units (km, kg, %), and non-numeric chars. Keep only valid number format.',
+      '- PRESERVE original number formats when possible (e.g., "16K" stays "16K", "$1,234.56" keeps structure).',
+      '- Numeric columns: only remove invalid characters. Keep abbreviated formats (K, M, B, %) if present.',
       '- Date columns: parse flexibly (MM/DD/YYYY, DD-MM-YYYY, ISO, etc.), then output in specified format. Invalid dates → empty string.',
       '- Text columns: remove control characters (U+0000 to U+001F except tabs/newlines), normalize quotes (curly quotes to straight quotes).',
       
@@ -679,7 +689,11 @@ export class AiService {
     ];
     
     if (opts.thousandsSeparator || opts.decimalSeparator) {
-      rules.push(`For numeric cells, format with thousands separator "${opts.thousandsSeparator ?? ''}" and decimal separator "${opts.decimalSeparator ?? ''}".`);
+      const ts = opts.thousandsSeparator || ',';
+      const ds = opts.decimalSeparator || '.';
+      rules.push(`IMPORTANT: For numeric values that need standardization, use thousands separator "${ts}" and decimal separator "${ds}".`);
+      rules.push(`Example: If input is "16000" or "16,000" or "16 000", output as "16${ts}000". If input is "1234.56", output as "1${ts}234${ds}56".`);
+      rules.push(`Keep abbreviated formats: "16K" stays "16K", "1.5M" stays "1.5M", "25%" stays "25%", "$100" can stay "$100".`);
     }
     
     if (opts.dateFormat) {
@@ -719,5 +733,54 @@ export class AiService {
       } catch {}
     }
     return null;
+  }
+
+  // Extract the best candidate string content produced by the AI response.
+  // Providers sometimes put structured output into nested fields instead of
+  // message.content; this helper tries a few fallbacks and returns a trimmed
+  // string suitable for JSON extraction/parsing.
+  private extractAiContent(resData: any): string {
+    if (!resData) return '';
+    const choice = Array.isArray(resData.choices) ? resData.choices[0] : resData.choice ?? null;
+    const message = choice?.message ?? choice ?? null;
+
+    let content = '';
+    if (typeof message === 'string') {
+      content = message;
+    } else if (message && typeof message === 'object') {
+      if (typeof message.content === 'string' && message.content.trim()) {
+        content = message.content;
+      } else if (message.response_format && typeof message.response_format === 'object') {
+        // If the API returned a structured response_format, stringify it.
+        try {
+          content = JSON.stringify(message.response_format);
+        } catch {
+          content = String(message.response_format ?? '');
+        }
+      } else if (message.data) {
+        // Some providers may put the cleaned payload directly under `data`.
+        try {
+          content = typeof message.data === 'string' ? message.data : JSON.stringify(message.data);
+        } catch {
+          content = String(message.data ?? '');
+        }
+      } else {
+        // Last resort: stringify the whole message/choice object so we can try
+        // to extract JSON substrings from it.
+        try {
+          content = JSON.stringify(message);
+        } catch {
+          content = String(message ?? '');
+        }
+      }
+    } else {
+      try {
+        content = JSON.stringify(resData);
+      } catch {
+        content = String(resData ?? '');
+      }
+    }
+
+    return (content || '').trim();
   }
 }
