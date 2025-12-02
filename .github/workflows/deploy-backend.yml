@@ -1,38 +1,29 @@
-name: Deploy Backend to VPS
+name: Deploy Backend
 
 on:
   push:
-    branches: [ main ]
-    paths:
-      - 'BE_WEB/**'
-  workflow_dispatch:
+    branches:
+      - main  # Khi có push lên main
 
 jobs:
   deploy:
     runs-on: ubuntu-latest
+
     steps:
-      - name: Deploy to Production
-        uses: appleboy/ssh-action@master
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Deploy to VPS
+        uses: appleboy/ssh-action@v1.0.3
         with:
-          host: ${{ secrets.BE_VPS_HOST }}
-          username: ${{ secrets.VPS_USERNAME }}
+          host: ${{ secrets.VPS_HOST }}
+          username: ${{ secrets.VPS_USER }}
           key: ${{ secrets.VPS_SSH_KEY }}
-          port: 22
+          port: 24700
           script: |
-            cd /var/www/be-datavis
+            cd /home/datavis/BE_WEB
+            git reset --hard origin/main
             git pull origin main
             npm install
             npm run build
-            npx prisma migrate deploy
-            pm2 reload ecosystem.config.js --env production
-            pm2 save
-            
-      - name: Check deployment status
-        uses: appleboy/ssh-action@master
-        with:
-          host: ${{ secrets.BE_VPS_HOST }}
-          username: ${{ secrets.VPS_USERNAME }}
-          key: ${{ secrets.VPS_SSH_KEY }}
-          script: |
-            pm2 status
-            pm2 logs be-datavis --lines 50 --nostream
+            pm2 restart /home/datavis/BE_WEB/ecosystem.config.js --env production
