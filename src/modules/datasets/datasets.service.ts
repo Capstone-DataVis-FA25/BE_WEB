@@ -11,16 +11,24 @@ import { CreateDatasetDto, CreateDataHeaderDto } from "./dto/create-dataset.dto"
 import { UpdateDatasetDto } from "./dto/update-dataset.dto";
 import { Prisma } from "@prisma/client";
 import { KmsService } from "../kms/kms.service";
+import { SubscriptionPlansService } from "../subscription-plans/subscription-plans.service";
 
 @Injectable()
 export class DatasetsService {
   constructor(
     private readonly prismaService: PrismaService,
-    private readonly kmsService: KmsService
+    private readonly kmsService: KmsService,
+    private readonly subscriptionPlansService: SubscriptionPlansService,
   ) { }
 
   async create(createDatasetDto: CreateDatasetDto, userId: string) {
-    const { headers, name, description, thousandsSeparator, decimalSeparator, dateFormat } = createDatasetDto;
+    // Check subscription limit first
+    const limitCheck = await this.subscriptionPlansService.canCreateDataset(userId);
+    if (!limitCheck.allowed) {
+      throw new ForbiddenException(limitCheck.message);
+    }
+
+    const { headers, name, description, thousandsSeparator, decimalSeparator } = createDatasetDto;
 
     // Validate header names are unique
     const headerNames = headers.map(h => h.name);
@@ -30,9 +38,9 @@ export class DatasetsService {
     }
 
     // Validate data types in headers
-    console.log('🔍 Validating headers:', headers.map(h => ({ name: h.name, type: h.type, dataLength: h.data.length })));
+    // console.log('🔍 Validating headers:', headers.map(h => ({ name: h.name, type: h.type, dataLength: h.data.length })));
     const validation = this.validateHeaderDataTypes(headers);
-    console.log('🔍 Validation result:', validation);
+    // console.log('🔍 Validation result:', validation);
     if (!validation.isValid) {
       throw new BadRequestException(`Data type validation failed: ${validation.errors.join(', ')}`);
     }
@@ -54,6 +62,7 @@ export class DatasetsService {
           name: header.name,
           type: header.type,
           index: header.index,
+          dateFormat: header.dateFormat ?? "YYYY-MM-DD",
           encryptedData: encryptionResult.encryptedData,
           iv: encryptionResult.iv,
           authTag: encryptionResult.authTag,
@@ -73,7 +82,6 @@ export class DatasetsService {
           columnCount,
           thousandsSeparator: thousandsSeparator || ",",
           decimalSeparator: decimalSeparator || ".",
-          dateFormat: dateFormat || "YYYY-MM-DD",
           headers: {
             create: encryptedHeaders,
           },
@@ -115,7 +123,6 @@ export class DatasetsService {
           columnCount: true,
           thousandsSeparator: true,
           decimalSeparator: true,
-          dateFormat: true,
           createdAt: true,
           updatedAt: true,
           userId: true,
@@ -182,14 +189,14 @@ export class DatasetsService {
       // First validate ownership
       await this.validateOwnership(id, userId);
 
-      const { headers, name, description, thousandsSeparator, decimalSeparator, dateFormat } = updateDatasetDto;
+      const { headers, name, description, thousandsSeparator, decimalSeparator } = updateDatasetDto;
       const updateData: Prisma.DatasetUpdateInput = {};
 
       if (name !== undefined) updateData.name = name;
       if (description !== undefined) updateData.description = description;
       if (thousandsSeparator !== undefined) updateData.thousandsSeparator = thousandsSeparator;
       if (decimalSeparator !== undefined) updateData.decimalSeparator = decimalSeparator;
-      if (dateFormat !== undefined) updateData.dateFormat = dateFormat;
+      // dataset-level dateFormat removed; use per-header dateFormat instead
 
       if (headers !== undefined) {
         // Validate header names are unique
@@ -219,13 +226,13 @@ export class DatasetsService {
             const dataString = JSON.stringify(header.data);
 
             // Encrypt the data using KMS
-            const encryptionResult =
-              await this.kmsService.encryptData(dataString);
+            const encryptionResult = await this.kmsService.encryptData(dataString);
 
             return {
               name: header.name,
               type: header.type,
               index: header.index,
+              dateFormat: header.dateFormat ?? "YYYY-MM-DD",
               encryptedData: encryptionResult.encryptedData,
               iv: encryptionResult.iv,
               authTag: encryptionResult.authTag,

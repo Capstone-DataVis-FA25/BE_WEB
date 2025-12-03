@@ -1,8 +1,10 @@
+import { ActivityService } from './../activity/activity.service';
 import {
   Injectable,
   BadRequestException,
   NotFoundException,
   UnauthorizedException,
+  Logger,
 } from "@nestjs/common";
 import { PrismaService } from "../../prisma/prisma.service";
 import { CreateUserDto, UserRole } from "./dto/create-user.dto";
@@ -11,10 +13,14 @@ import { User, UserWithoutPassword } from "../../types/user.types";
 import * as bcrypt from "bcryptjs";
 import { ChangePasswordDTO } from "./dto/change-password.dto";
 import { Messages } from "src/constant/message-config";
+import { AppConstants } from "src/constant/app.constants";
 
 @Injectable()
 export class UsersService {
-  constructor(private prismaService: PrismaService) { }
+  private readonly logger = new Logger(UsersService.name);
+  private cachedDefaultPlanId?: string;
+
+  constructor(private prismaService: PrismaService, private activityService: ActivityService) { }
 
   async create(createUserDto: CreateUserDto): Promise<User> {
     // Hash password only if provided (for Google OAuth users, password might be undefined)
@@ -22,12 +28,20 @@ export class UsersService {
       ? await bcrypt.hash(createUserDto.password, 10)
       : null;
 
+    const defaultPlanId = await this.getDefaultSubscriptionPlanId();
+
+    const data = {
+      ...createUserDto,
+      password: hashedPassword ?? undefined,
+      role: createUserDto.role || UserRole.USER,
+    };
+
+    if (!data.subscriptionPlanId && defaultPlanId) {
+      data.subscriptionPlanId = defaultPlanId;
+    }
+
     const user = await this.prismaService.prisma.user.create({
-      data: {
-        ...createUserDto,
-        password: hashedPassword,
-        role: createUserDto.role || UserRole.USER,
-      },
+      data,
     });
 
     return user as User;
@@ -35,11 +49,14 @@ export class UsersService {
 
   async findAll(): Promise<UserWithoutPassword[]> {
     const users = await this.prismaService.prisma.user.findMany({
-            omit: {
+      omit: {
         password: true,
         currentHashedRefreshToken: true,
         currentVerifyToken: true,
-            }
+      },
+      include: {
+        subscriptionPlan: true,
+      }
     });
 
     return users as UserWithoutPassword[];
@@ -48,11 +65,14 @@ export class UsersService {
   async findOne(id: string): Promise<UserWithoutPassword | null> {
     const user = await this.prismaService.prisma.user.findUnique({
       where: { id },
-           omit: {
+      omit: {
         password: true,
         currentHashedRefreshToken: true,
         currentVerifyToken: true,
-            }
+      },
+      include: {
+        subscriptionPlan: true,
+      }
     });
     return user as UserWithoutPassword | null;
   }
@@ -224,5 +244,68 @@ export class UsersService {
     });
 
     return { user: updatedUser };
+  }
+
+  // Lock or unlock a user (admin functionality)
+  async lockUnlockUser(
+    userId: string,
+    isActive: boolean
+  ): Promise<UserWithoutPassword> {
+    try {
+      const user = await this.prismaService.prisma.user.update({
+        where: { id: userId },
+        data: {
+          isActive: isActive,
+        },
+        omit: {
+          password: true,
+          currentHashedRefreshToken: true,
+          currentVerifyToken: true,
+        }
+      });
+
+      // Create activity log
+      try {
+        await this.activityService.createLog({
+          actorId: userId,
+          actorType: "USER",
+          action: isActive ? "LOCK_USER" : "UNLOCK_USER",
+          resource: "USER",
+          metadata: { userId, isActive },
+        });
+      } catch (activityError) {
+        this.logger.error('Failed to create activity log:', activityError);
+        // Don't throw here as the main operation (lock/unlock) should still succeed
+      }
+
+      return user as UserWithoutPassword;
+    } catch (error) {
+      this.logger.error('Failed to lock/unlock user:', error);
+      throw error;
+    }
+  }
+
+  private async getDefaultSubscriptionPlanId(): Promise<string | null> {
+    if (this.cachedDefaultPlanId) {
+      return this.cachedDefaultPlanId;
+    }
+
+    const planName = AppConstants.DEFAULT_SUBSCRIPTION_PLAN_NAME;
+    if (!planName) {
+      return null;
+    }
+
+    const plan = await this.prismaService.prisma.subscriptionPlan.findFirst({
+      where: { name: planName, isActive: true },
+      select: { id: true },
+    });
+
+    if (!plan) {
+      this.logger.warn(`Default subscription plan "${planName}" not found or inactive.`);
+      return null;
+    }
+
+    this.cachedDefaultPlanId = plan.id;
+    return plan.id;
   }
 }

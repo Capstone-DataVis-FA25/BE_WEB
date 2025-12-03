@@ -11,6 +11,7 @@ import {
   IsBoolean,
   Min,
   Max,
+  IsObject,
 } from "class-validator";
 import { Type } from "class-transformer";
 
@@ -1106,90 +1107,53 @@ export class FormattersDto {
   customXFormatter?: string;
 }
 
-// Nested config structure DTO
+// Nested config structure DTO - simplified to accept any object structure
 export class NestedChartConfigDto {
-  @ApiProperty({ description: "Chart configuration", type: ChartConfigDto })
-  @ValidateNested()
-  @Type(() => ChartConfigDto)
-  config: ChartConfigDto;
+  @ApiProperty({ description: "Chart configuration", type: Object })
+  @IsObject()
+  config: any;
 
-  @ApiProperty({ description: "Chart formatters", type: FormattersDto })
-  @ValidateNested()
-  @Type(() => FormattersDto)
-  formatters: FormattersDto;
+  @ApiProperty({ description: "Chart formatters", type: Object })
+  @IsObject()
+  formatters: any;
 
-  @ApiPropertyOptional({ description: "Series configurations", default: [] })
+  @ApiPropertyOptional({ description: "Axis configurations", type: Object })
   @IsOptional()
-  @IsArray()
-  seriesConfigs?: any[];
+  @IsObject()
+  axisConfigs?: any;
 }
 
 export class CreateChartDto {
-  @ApiProperty({
-    description: "Name for the chart",
-    example: "Sample Line Chart",
-    required: true,
-  })
+  @ApiProperty({ description: 'Name for the chart', example: 'Sample Line Chart', required: true })
   @IsString()
-  @IsNotEmpty({ message: "Chart name is required" })
-  @MaxLength(50, { message: "Chart name must be at most 50 characters long" })
+  @IsNotEmpty({ message: 'Chart name is required' })
+  @MaxLength(50, { message: 'Chart name must be at most 50 characters long' })
   name: string;
 
-  @ApiProperty({
-    description: "Description for the chart",
-    example: "A test line chart",
-    required: false,
-  })
+  @ApiPropertyOptional({ description: 'Description for the chart', example: 'A test line chart' })
   @IsOptional()
   @IsString()
-  @MaxLength(200, {
-    message: "Chart description must be at most 200 characters long",
-  })
+  @MaxLength(200, { message: 'Chart description must be at most 200 characters long' })
   description?: string;
 
-  @ApiProperty({
-    description: "Type of chart",
-    example: "line",
-    required: true,
-    enum: CHART_TYPES,
-  })
+  @ApiProperty({ description: 'Type of chart', example: 'bar', enum: CHART_TYPES })
   @IsString()
-  @IsNotEmpty({ message: "Chart type is required" })
-  @IsIn(CHART_TYPES, { message: "Invalid chart type" })
+  @IsNotEmpty({ message: 'Chart type is required' })
+  @IsIn(CHART_TYPES, { message: 'Invalid chart type' })
   type: ChartType;
 
-  @ApiProperty({
-    description:
-      "Chart configuration with nested structure containing config, formatters and seriesConfigs.",
-    example: {
-      config: {
-        title: "Sample Chart",
-        width: 700,
-        height: 300,
-        margin: { top: 20, left: 50, right: 30, bottom: 40 },
-      },
-      formatters: {
-        useYFormatter: true,
-        useXFormatter: true,
-        yFormatterType: "number",
-        xFormatterType: "number",
-        customYFormatter: "",
-        customXFormatter: "",
-      },
-      seriesConfigs: [],
-    },
-    required: true,
-  })
-  @ValidateNested()
-  @Type(() => NestedChartConfigDto)
-  config: NestedChartConfigDto;
+  // Accept the entire config payload as an arbitrary object (nested validation disabled)
+  @ApiProperty({ description: 'Chart configuration payload (nested object)', type: Object })
+  @IsObject()
+  config: any;
 
-  @ApiProperty({
-    description: "ID of the dataset this chart belongs to",
-    example: "clx1234567890abcdef",
-    required: true,
-  })
+  @ApiPropertyOptional({ description: 'ID of the dataset this chart belongs to', example: 'clx1234567890abcdef' })
+  @IsOptional()
   @IsString()
-  @IsNotEmpty({ message: "Dataset ID is required" })
-  datasetId: string;
+  datasetId?: string;
+  
+  @ApiPropertyOptional({ description: 'URL of the chart image', example: 'https://example.com/chart.png' })
+  @IsOptional()
+  @IsString()
+  imageUrl?: string;
 }

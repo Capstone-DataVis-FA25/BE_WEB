@@ -66,6 +66,7 @@ $ npm run start:prod
 ## API Endpoints
 
 ### Authentication
+
 - `POST /auth/signup` - User registration
 - `POST /auth/signin` - User login
 - `POST /auth/google` - Google authentication
@@ -73,11 +74,13 @@ $ npm run start:prod
 - `POST /auth/signout` - User logout
 
 ### Users
-- `GET /users` - Get all users
+
+- `GET /users` - Get all users (Admin only)
 - `GET /users/:id` - Get user by ID
 - `POST /users` - Create new user
 - `PATCH /users/:id` - Update user
 - `DELETE /users/:id` - Delete user
+- `PATCH /users/:id/lock-unlock` - Lock or unlock a user (Admin only)
 
 ## Test
 

@@ -35,6 +35,15 @@ export class CreateDataHeaderDto {
     @IsArray()
     @ArrayMinSize(1, { message: 'Each column must have at least one data value' })
     data: any[];
+
+    @ApiProperty({
+        description: 'Date format for this column (only used when type = date)',
+        example: 'YYYY-MM-DD',
+        required: false,
+    })
+    @IsOptional()
+    @IsString()
+    dateFormat?: string;
 }
 
 // Custom validator for consistent header data lengths
@@ -96,7 +105,7 @@ export class CreateDatasetDto {
     })
     @IsString()
     @IsNotEmpty({ message: 'Dataset name is required' })
-    @MaxLength(20, { message: 'Dataset name must be at most 20 characters long' })
+    @MaxLength(50, { message: 'Dataset name must be at most 50 characters long' })
     name: string;
 
     @ApiProperty({
@@ -106,7 +115,7 @@ export class CreateDatasetDto {
     })
     @IsOptional()
     @IsString()
-    @MaxLength(100, { message: 'Dataset description must be at most 100 characters long' })
+    @MaxLength(200, { message: 'Dataset description must be at most 200 characters long' })
     description?: string;
 
     @ApiProperty({
@@ -127,12 +136,5 @@ export class CreateDatasetDto {
     @IsString()
     decimalSeparator?: string;
 
-    @ApiProperty({
-        description: 'Date format for date parsing',
-        example: 'YYYY-MM-DD',
-        required: false,
-    })
-    @IsOptional()
-    @IsString()
-    dateFormat?: string;
+    // Removed dataset-level dateFormat; date format now belongs to each DataHeader
 }
