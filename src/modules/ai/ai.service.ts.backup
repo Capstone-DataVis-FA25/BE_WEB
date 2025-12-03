@@ -89,13 +89,14 @@ export class AiService {
     this.logger.log(`[sendCleanRequest] Starting, CSV length: ${csvText.length}`);
 
     const systemPrompt = (payload?.notes ? payload.notes + '\n\n' : '') +
-      'You are a data cleaning assistant. Clean the CSV data and return it in the "data" field as a 2D array. The first inner array is the header row.\n' +
-      '- Trim whitespace from all cells\n' +
-      '- Remove exact duplicate rows (keep first)\n' +
-      '- For numeric columns: remove invalid characters, keep numbers only\n' +
-      '- For date columns: standardize format if possible\n' +
-      '- Use empty string for missing/unparseable values\n' +
-      '- Do NOT invent data';
+      'You are a strict CSV cleaning assistant. Output ONLY a valid JSON array of arrays (2D matrix). No markdown, no code fences, no explanations, and no additional text. The first inner array must be the header row.\n' +
+      '- Trim leading/trailing whitespace from all cells.\n' +
+      '- Normalize quotes and collapse internal multiple spaces.\n' +
+      '- Remove exact duplicate rows (keep first occurrence).\n' +
+      '- For numeric columns: remove currency symbols and non-numeric characters; if unparseable leave empty string.\n' +
+      '- For date columns: attempt to parse and standardize; if unparseable leave empty string.\n' +
+      '- Do NOT invent or infer missing data. If a value cannot be deterministically fixed, use empty string.\n' +
+      'Return the cleaned table as a JSON array of arrays only. If you cannot produce a valid JSON array, return an empty JSON array: []';
     const userPrompt = 'Original CSV:\n' + csvText;
 
     if (csvText.length > MAX_CHARS || this.estimateTokens(systemPrompt + userPrompt) > MAX_TOKENS) {
@@ -115,27 +116,6 @@ export class AiService {
         { role: 'user', content: userPrompt },
       ],
       temperature: 0,
-      response_format: {
-        type: 'json_schema',
-        json_schema: {
-          name: 'cleaned_data',
-          strict: true,
-          schema: {
-            type: 'object',
-            properties: {
-              data: {
-                type: 'array',
-                items: {
-                  type: 'array',
-                  items: { type: 'string' },
-                },
-              },
-            },
-            required: ['data'],
-            additionalProperties: false,
-          },
-        },
-      },
     };
 
     const maxRetries = 4;
@@ -210,22 +190,7 @@ export class AiService {
     
     this.logger.log(`[cleanCsv] Got response, length: ${cleanedCsv?.length || 0} chars`);
     
-    // Parse JSON response with structured output format: {"data": [[...]]}
-    let rows: any[][] = [];
-    try {
-      const parsed = JSON.parse(cleanedCsv);
-      if (parsed && Array.isArray(parsed.data)) {
-        rows = parsed.data;
-      } else if (Array.isArray(parsed)) {
-        rows = parsed; // fallback if AI returns array directly
-      } else {
-        throw new Error('Invalid response structure');
-      }
-    } catch (err) {
-      this.logger.error(`[cleanCsv] Failed to parse JSON response: ${err.message}`);
-      throw new InternalServerErrorException('AI returned invalid JSON format');
-    }
-    
+    const rows = this.csvToRows(cleanedCsv);
     this.logger.log(`[cleanCsv] Parsed ${rows.length} rows`);
     
     return { data: rows, rowCount: rows.length, columnCount: rows[0]?.length || 0 };

@@ -16,6 +16,10 @@ interface AiCleanJobRecord {
   inputSize?: number; // e.g. csv length, row count, or file size in bytes
   result?: any;
   error?: string;
+  // Progress tracking
+  progress?: number; // 0-100 percentage
+  totalChunks?: number; // total number of chunks to process
+  completedChunks?: number; // chunks completed so far
 }
 
 const jobStore = new Map<string, AiCleanJobRecord>();
@@ -52,6 +56,9 @@ export class AiCleanJobService {
       createdAt: new Date(),
       updatedAt: new Date(),
       inputSize,
+      progress: 0,
+      totalChunks: 0,
+      completedChunks: 0,
     });
     this.processJob(jobId, userId, cleanPayload);
     return jobId;
@@ -62,6 +69,28 @@ export class AiCleanJobService {
       this.logger.log(`[Job ${jobId}] START processing for user ${userId}`);
       this.logger.debug(`[Job ${jobId}] Payload keys: ${Object.keys(cleanPayload || {}).join(', ')}`);
 
+      // Progress callback to update job and notify user (for progress bar updates)
+      const onProgress = (completed: number, total: number) => {
+        const job = jobStore.get(jobId);
+        if (!job) return;
+        const progress = total > 0 ? Math.floor((completed / total) * 100) : 0;
+        job.progress = progress;
+        job.totalChunks = total;
+        job.completedChunks = completed;
+        job.updatedAt = new Date();
+        jobStore.set(jobId, job);
+        this.logger.debug(`[Job ${jobId}] Progress: ${completed}/${total} chunks (${progress}%)`);
+        // Emit progress notification (frontend should NOT show toast, only update progress bar)
+        this.notificationService.notifyUser(userId, {
+          type: 'clean-dataset-progress',
+          jobId,
+          userId,
+          progress,
+          completed,
+          total,
+        });
+      };
+
       // Determine payload type: file upload vs raw CSV text
       let result: any;
       if (cleanPayload?.file) {
@@ -70,14 +99,17 @@ export class AiCleanJobService {
         this.logger.debug(`[Job ${jobId}] File size: ${cleanPayload?.fileSize || 'unknown'} bytes`);
         this.logger.log(`[Job ${jobId}] Calling aiService.cleanExcelToMatrix...`);
         const start = Date.now();
-        result = await this.aiService.cleanExcelToMatrix({ file: cleanPayload.file, options: cleanPayload.options || {} });
+        result = await this.aiService.cleanExcelToMatrix({ 
+          file: cleanPayload.file, 
+          options: { ...cleanPayload.options || {}, onProgress } 
+        });
         this.logger.log(`[Job ${jobId}] cleanExcelToMatrix completed in ${Date.now() - start}ms`);
       } else if (typeof cleanPayload?.csv === 'string') {
         // Raw CSV text path
         this.logger.log(`[Job ${jobId}] Detected raw CSV text (length: ${cleanPayload.csv.length} chars)`);
         this.logger.log(`[Job ${jobId}] Calling aiService.cleanCsv...`);
         const start = Date.now();
-        result = await this.aiService.cleanCsv(cleanPayload);
+        result = await this.aiService.cleanCsv({ ...cleanPayload, onProgress });
         this.logger.log(`[Job ${jobId}] cleanCsv completed in ${Date.now() - start}ms`);
       } else {
         this.logger.error(`[Job ${jobId}] Unsupported payload: no file or csv text found`);
@@ -214,5 +246,18 @@ export class AiCleanJobService {
     return Array.from(jobStore.values())
       .filter(j => j.userId === userId && typeof j.inputSize === 'number')
       .reduce((sum, j) => sum + (j.inputSize || 0), 0);
+  }
+
+  // Get current progress for a job
+  getJobProgress(jobId: string) {
+    const job = jobStore.get(jobId);
+    if (!job) return null;
+    return {
+      jobId,
+      status: job.status,
+      progress: job.progress ?? 0,
+      totalChunks: job.totalChunks ?? 0,
+      completedChunks: job.completedChunks ?? 0,
+    };
   }
 }
