@@ -2,6 +2,7 @@ import { Injectable, InternalServerErrorException, Logger, BadRequestException }
 import { ConfigService } from '@nestjs/config';
 import * as XLSX from 'xlsx';
 import * as fs from 'fs';
+import * as path from 'path';
 import { CleanCsvDto } from './dto/clean-csv.dto';
 import { parse } from 'fast-csv';
 import { Readable } from 'stream';
@@ -18,6 +19,17 @@ export class AiService {
 
   constructor(private readonly configService: ConfigService) {
     this.apiKey = this.configService.get<string>('OPENROUTER_API_KEY') || '';
+  }
+
+  private async loadUserGuide(): Promise<string> {
+    try {
+      const guidePath = path.join(__dirname, 'USER_GUIDE_DRIVER_STEPS.md');
+      const content = await fs.promises.readFile(guidePath, 'utf8');
+      return `# DataVis User Guide\n\n${content}`;
+    } catch (err) {
+      this.logger.warn('Could not load user guide, continuing without it');
+      return '';
+    }
   }
 
   private getCommonHeaders(apiKey: string) {
@@ -45,7 +57,74 @@ export class AiService {
     }
 
     const targetLang = languageCode || 'auto';
-    const systemPrompt = `You are a statistics and data visualization expert. Answer clearly, practically, and actionable. Language: ${targetLang}.`;
+    
+    // Load documentation for context
+    const userGuideDoc = await this.loadUserGuide();
+    
+    const systemPrompt = `You are a DataVis Web Application assistant with access to the official user guide.
+
+${userGuideDoc}
+
+RESPONSE FORMAT RULES:
+1. **Use Markdown formatting** for better readability:
+   - Use **bold** for important terms and UI elements (buttons, menus, sections)
+   - Use numbered lists (1., 2., 3.) for step-by-step instructions
+   - Use bullet points (-) for features or options
+   - Use > blockquotes for tips or warnings
+   - Use headings (##) to separate sections when needed
+
+2. **Structure your answers clearly**:
+   - Start with a brief summary (1-2 sentences)
+   - Follow with detailed steps or explanation
+   - End with a helpful tip or next action (if relevant)
+
+3. **Reference UI elements that users can SEE**:
+   - Use visible labels: "New Chart button", "Dataset selector", "Chart Type dropdown"
+   - Use locations: "in the upper right corner", "in the sidebar", "at the top of the page"
+   - DON'T mention technical selectors like #btn-new-chart or .class-name
+   - DO describe what users see: "Click the blue **New Chart** button in the top right"
+
+4. **Follow documented workflows**:
+   - Reference exact page names and navigation paths
+   - Use the correct workflow from the user guide
+   - If info is not in the guide, clearly state it
+
+EXAMPLE RESPONSE FORMAT:
+
+**Question:** "How to create a new chart?"
+
+**Answer:**
+Để tạo biểu đồ mới trong DataVis, bạn làm theo các bước sau:
+
+## Các bước thực hiện
+
+1. **Vào trang Charts**
+   - Click vào menu **"Charts"** ở thanh điều hướng chính
+   - Hoặc truy cập trực tiếp tại \`/workspace/charts\`
+
+2. **Tạo biểu đồ mới**
+   - Tìm nút **"New Chart"** ở góc trên bên phải màn hình
+   - Click vào nút này để bắt đầu
+
+3. **Chọn template tại Chart Gallery**
+   - Hệ thống sẽ chuyển bạn đến trang Gallery
+   - Chọn dataset từ menu dropdown **"Dataset"** (hoặc dùng sample data)
+   - Lọc template theo danh mục tại dropdown **"Category"**
+   - Browse qua các template và click **"Continue"** trên template bạn thích
+
+4. **Customize trong Chart Editor**
+   - Đổi loại biểu đồ bằng **Chart Type selector**
+   - Quản lý dữ liệu tại phần **Series Management**
+   - Tùy chỉnh màu sắc, trục, chú thích tại phần **Chart Settings**
+   - Click nút **"Save"** để lưu biểu đồ
+
+> **💡 Mẹo:** Bạn có thể bỏ qua bước chọn dataset để dùng sample data và thử nghiệm ngay!
+
+**Tiếp theo:** Bạn muốn tìm hiểu về loại biểu đồ nào? (Line, Bar, Pie, Heatmap...)
+
+---
+
+IMPORTANT: Speak naturally about UI elements users can see. DON'T expose technical implementation details. Language: ${targetLang}.`;
 
     const modelMessages = [
       { role: 'system', content: systemPrompt },
