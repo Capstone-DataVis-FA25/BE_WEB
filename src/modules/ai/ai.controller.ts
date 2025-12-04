@@ -233,4 +233,27 @@ export class AiController {
     const ids = this.aiCleanJobService.getPendingJobIds();
     return { code: 200, message: 'Success', data: ids };
   }
+
+  @Get('clean-progress')
+  @ApiOperation({ summary: 'Get current cleaning progress for a jobId' })
+  @ApiQuery({ name: 'jobId', required: true, description: 'Job ID to check progress' })
+  @ApiOkResponse({ 
+    description: 'Current progress', 
+    schema: { 
+      type: 'object', 
+      properties: { 
+        jobId: { type: 'string' },
+        status: { type: 'string' },
+        progress: { type: 'number' },
+        totalChunks: { type: 'number' },
+        completedChunks: { type: 'number' }
+      } 
+    } 
+  })
+  async getCleanProgress(@Query('jobId') jobId: string) {
+    if (!jobId) throw new HttpException('Missing jobId', HttpStatus.BAD_REQUEST);
+    const progress = this.aiCleanJobService.getJobProgress(jobId);
+    if (!progress) throw new HttpException('Job not found', HttpStatus.NOT_FOUND);
+    return { code: 200, message: 'Success', data: progress };
+  }
 }
