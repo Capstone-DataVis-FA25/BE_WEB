@@ -168,14 +168,59 @@ IMPORTANT: Speak naturally about UI elements users can see. DON'T expose technic
 
     this.logger.log(`[sendCleanRequest] Starting, CSV length: ${csvText.length}`);
 
+    // Build additional cleaning instructions based on user-selected options
+    const additionalInstructions: string[] = [];
+    
+    if (payload?.removeOutliers === true) {
+      additionalInstructions.push('- Remove or cap outliers: detect numeric outliers using IQR method and cap them to reasonable bounds');
+    }
+    
+    if (payload?.validateDomain === true) {
+      additionalInstructions.push('- Validate domain constraints: check if values make sense (e.g., age 0-120, valid email format)');
+    }
+    
+    if (payload?.standardizeUnits === true) {
+      additionalInstructions.push('- Standardize units: convert all measurements to consistent units (e.g., km to m, lbs to kg)');
+    }
+    
+    // Base cleaning instructions (always applied)
+    const baseInstructions = [
+      '- Trim whitespace from all cells',
+      '- Remove exact duplicate rows (keep first occurrence)',
+      '- Standardize text case: capitalize proper names (cities, person names), use title case for multi-word fields',
+      '- For city names: standardize common variations (e.g., "Sài Gòn", "HCM", "ho chi minh", "Thành Phố Hồ Chí Minh" → all become "Ho Chi Minh")',
+      '- For person names: capitalize each word properly (e.g., "john doe", "JOHN DOE" → "John Doe")',
+      '- For gender field: standardize to "Male", "Female", "Other" (case-insensitive match)',
+      '- For numeric columns:',
+      '  * Remove all non-numeric characters except decimal separator',
+      `  * Apply thousand separator: ${payload?.thousandsSeparator || ','}`,
+      `  * Apply decimal separator: ${payload?.decimalSeparator || '.'}`,
+      '  * Format numbers consistently (e.g., 1000 → 1,000 if thousand separator is comma)',
+      '  * Remove outliers that are clearly errors (e.g., weight=6000kg, height=1.70m, age=150)',
+      '- For missing/empty values - IMPORTANT RULES:',
+      '  * First check: if row has ID column and ID is missing → REMOVE the entire row',
+      '  * Second check: if row has name column and name is missing → REMOVE the entire row', 
+      '  * Third check: count missing fields in the row:',
+      '    - If >30% fields missing → REMOVE the entire row',
+      '    - If ≤30% fields missing → KEEP row and fill ALL missing values using these rules:',
+      '  * For kept rows with missing values, fill based on column type:',
+      '    - Numeric columns (age, weight, height, income, etc.): calculate mean/median of that column, fill missing cells with the mean (rounded appropriately)',
+      '    - Text columns (city, name, status, etc.): find the MOST COMMON value (mode) in that column and fill missing cells with that value',
+      '    - Date columns: find the MOST COMMON date in that column and fill missing cells with that date',
+      '    - Gender/category columns: find the MOST COMMON category and fill missing cells with that value',
+      '  * IMPORTANT: Calculate mean/mode BEFORE filling, then apply to all missing cells in that column',
+      '  * Each row MUST have same number of columns as header',
+      '  * Do NOT remove columns, do NOT shift data, do NOT leave any empty cells',
+      '- For date columns: standardize to YYYY-MM-DD format',
+      '- Do NOT invent data, do NOT add new rows, do NOT skip columns'
+    ];
+    
+    // Combine base instructions with additional user-selected options
+    const allInstructions = [...baseInstructions, ...additionalInstructions];
+    
     const systemPrompt = (payload?.notes ? payload.notes + '\n\n' : '') +
       'You are a data cleaning assistant. Clean the CSV data and return it in the "data" field as a 2D array. The first inner array is the header row.\n' +
-      '- Trim whitespace from all cells\n' +
-      '- Remove exact duplicate rows (keep first)\n' +
-      '- For numeric columns: remove invalid characters, keep numbers only\n' +
-      '- For date columns: standardize format if possible\n' +
-      '- Use empty string for missing/unparseable values\n' +
-      '- Do NOT invent data';
+      allInstructions.join('\n');
     const userPrompt = 'Original CSV:\n' + csvText;
 
     if (csvText.length > MAX_CHARS || this.estimateTokens(systemPrompt + userPrompt) > MAX_TOKENS) {
@@ -371,7 +416,153 @@ IMPORTANT: Speak naturally about UI elements users can see. DON'T expose technic
     return { data: rows, rowCount: rows.length, columnCount: rows[0]?.length || 0 };
   }
 
-  /** ========================= EXCEL / CSV PARSING ========================= */
+  /** ========================= LARGE CSV TEXT CLEAN (with progress) ========================= */
+  async cleanLargeCsvText(input: { csvText: string; options?: any }) {
+    const { csvText, options } = input;
+    if (!csvText) throw new BadRequestException('CSV text is required');
+    
+    this.logger.log(`[cleanLargeCsvText] Starting, CSV length: ${csvText.length} chars`);
+    
+    // Parse CSV text into rows
+    const rows = this.csvToRows(csvText);
+    if (!rows.length) throw new BadRequestException('No rows found in CSV');
+    
+    const header = rows[0];
+    const defaultRowsPerChunk = 200;
+    const chunks: any[][][] = [];
+    
+    // Split into chunks
+    for (let i = 1; i < rows.length; i += defaultRowsPerChunk) {
+      chunks.push(rows.slice(i, i + defaultRowsPerChunk));
+    }
+    
+    this.logger.log(`[cleanLargeCsvText] Split into ${chunks.length} chunks`);
+    
+    const results: any[][][] = [];
+    const concurrency = Math.min(3, chunks.length);
+    const inflight: Promise<void>[] = [];
+    let completedCount = 0;
+    
+    // Emit initial progress
+    if (options?.onProgress) {
+      options.onProgress(0, chunks.length);
+    }
+    
+    const schedule = (chunk: any[][], idx: number) => {
+      const task = (async () => {
+        const subResults: any[][] = [];
+        
+        // Sub-chunking logic (same as cleanLargeCsvToMatrix)
+        const makeSubchunks = async (rows: any[][]) => {
+          const out: any[][][] = [];
+          let current: any[][] = [];
+          for (const r of rows) {
+            current.push(r);
+            const csv = await this.rowsToCsv([header, ...current]);
+            if (csv.length >= this.CLEAN_MAX_CHARS * 0.8) {
+              current.pop();
+              if (current.length === 0) {
+                out.push([r]);
+                current = [];
+              } else {
+                out.push(current.slice());
+                current = [r];
+              }
+            }
+          }
+          if (current.length) out.push(current.slice());
+          return out;
+        };
+        
+        const subchunks = await makeSubchunks(chunk);
+        
+        for (let subIndex = 0; subIndex < subchunks.length; subIndex++) {
+          const sub = subchunks[subIndex];
+          const csv = await this.rowsToCsv([header, ...sub]);
+          
+          try {
+            const cleaned = await this.cleanCsv({ csv, notes: options?.notes } as any);
+            if (Array.isArray(cleaned?.data) && cleaned.data.length) {
+              subResults.push(...cleaned.data.slice(1)); // skip header
+            } else {
+              this.logger.warn(`Chunk ${idx} sub ${subIndex}: AI returned no cleaned rows`);
+            }
+          } catch (err) {
+            this.logger.error(`Chunk ${idx} sub ${subIndex} failed: ${err.message}`);
+            
+            if (err.message?.includes('too large')) {
+              this.logger.log(`Chunk ${idx} sub ${subIndex} still too large, splitting further...`);
+              
+              const midpoint = Math.floor(sub.length / 2);
+              if (midpoint > 0) {
+                const firstHalf = sub.slice(0, midpoint);
+                const secondHalf = sub.slice(midpoint);
+                
+                try {
+                  const csv1 = await this.rowsToCsv([header, ...firstHalf]);
+                  const cleaned1 = await this.cleanCsv({ csv: csv1, notes: options?.notes } as any);
+                  if (Array.isArray(cleaned1?.data) && cleaned1.data.length) {
+                    subResults.push(...cleaned1.data.slice(1));
+                  }
+                } catch (err1) {
+                  this.logger.error(`First half of chunk ${idx}.${subIndex} failed: ${err1.message}`);
+                }
+                
+                try {
+                  const csv2 = await this.rowsToCsv([header, ...secondHalf]);
+                  const cleaned2 = await this.cleanCsv({ csv: csv2, notes: options?.notes } as any);
+                  if (Array.isArray(cleaned2?.data) && cleaned2.data.length) {
+                    subResults.push(...cleaned2.data.slice(1));
+                  }
+                } catch (err2) {
+                  this.logger.error(`Second half of chunk ${idx}.${subIndex} failed: ${err2.message}`);
+                }
+              } else {
+                this.logger.error(`Cannot split further - single row too large`);
+              }
+            }
+          }
+        }
+        
+        results[idx] = [header, ...subResults];
+        
+        // Report progress
+        completedCount++;
+        if (options?.onProgress) {
+          options.onProgress(completedCount, chunks.length);
+        }
+      })();
+      
+      inflight.push(task);
+      task.finally(() => {
+        const i = inflight.indexOf(task);
+        if (i >= 0) inflight.splice(i, 1);
+      });
+      return task;
+    };
+    
+    chunks.forEach((chunk, idx) => schedule(chunk, idx));
+    await Promise.all(inflight);
+    
+    // Merge & deduplicate
+    const merged: any[][] = [header];
+    const seen = new Set<string>();
+    results.forEach(chunkRows => {
+      chunkRows.slice(1).forEach(row => {
+        const key = JSON.stringify(row);
+        if (!seen.has(key)) {
+          seen.add(key);
+          merged.push(row);
+        }
+      });
+    });
+    
+    this.logger.log(`[cleanLargeCsvText] Completed, merged ${merged.length - 1} rows (deduplicated)`);
+    
+    return { data: merged, rowCount: merged.length, columnCount: merged[0]?.length || 0 };
+  }
+
+  /** ========================= EXCEL / CSV PARSING =========================*/
   private async resolveFileBuffer(file: any): Promise<Buffer> {
     if (file?.buffer) return file.buffer as Buffer;
     if (file?.path) {
