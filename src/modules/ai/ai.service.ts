@@ -14,7 +14,7 @@ export class AiService {
   private readonly model = 'google/gemini-2.5-flash-lite-preview-09-2025';
   private readonly apiKey: string;
   // Safety limits used when sending CSV to the AI in a single request
-  private readonly CLEAN_MAX_CHARS = 250_000; // max characters per request
+  private readonly CLEAN_MAX_CHARS = 30_000; // Drastically reduced to avoid output token limits
   private readonly CLEAN_MAX_TOKENS = 20_000; // conservative token estimate
 
   constructor(private readonly configService: ConfigService) {
@@ -161,20 +161,66 @@ IMPORTANT: Speak naturally about UI elements users can see. DON'T expose technic
   }
 
   private async sendCleanRequest(csvText: string, payload?: Partial<CleanCsvDto>): Promise<string> {
-    const MAX_CHARS = 250_000;
-    const MAX_TOKENS = 20_000;
+    const MAX_CHARS = 30_000; // Drastically reduced to avoid output token limits
+    const MAX_TOKENS = 10_000; // Reduced input tokens
+    const MAX_OUTPUT_TOKENS = 8_000; // Reduced output token limit
     const REQUEST_TIMEOUT = 60000; // 60 seconds
 
     this.logger.log(`[sendCleanRequest] Starting, CSV length: ${csvText.length}`);
 
+    // Build additional cleaning instructions based on user-selected options
+    const additionalInstructions: string[] = [];
+    
+    if (payload?.removeOutliers === true) {
+      additionalInstructions.push('- Remove or cap outliers: detect numeric outliers using IQR method and cap them to reasonable bounds');
+    }
+    
+    if (payload?.validateDomain === true) {
+      additionalInstructions.push('- Validate domain constraints: check if values make sense (e.g., age 0-120, valid email format)');
+    }
+    
+    if (payload?.standardizeUnits === true) {
+      additionalInstructions.push('- Standardize units: convert all measurements to consistent units (e.g., km to m, lbs to kg)');
+    }
+    
+    // Base cleaning instructions (always applied)
+    const baseInstructions = [
+      '- Trim whitespace from all cells',
+      '- Remove exact duplicate rows (keep first occurrence)',
+      '- Standardize text case: capitalize proper names (cities, person names), use title case for multi-word fields',
+      '- For city names: standardize common variations (e.g., "Sài Gòn", "HCM", "ho chi minh", "Thành Phố Hồ Chí Minh" → all become "Ho Chi Minh")',
+      '- For person names: capitalize each word properly (e.g., "john doe", "JOHN DOE" → "John Doe")',
+      '- For gender field: standardize to "Male", "Female", "Other" (case-insensitive match)',
+      '- For numeric columns:',
+      '  * Remove all non-numeric characters except decimal separator',
+      `  * Apply thousand separator: ${payload?.thousandsSeparator || ','}`,
+      `  * Apply decimal separator: ${payload?.decimalSeparator || '.'}`,
+      '  * Format numbers consistently (e.g., 1000 → 1,000 if thousand separator is comma)',
+      '  * Remove outliers that are clearly errors (e.g., weight=6000kg, height=1.70m, age=150)',
+      '- For missing/empty values - IMPORTANT RULES:',
+      '  * First check: if row has ID column and ID is missing → REMOVE the entire row',
+      '  * Second check: if row has name column and name is missing → REMOVE the entire row', 
+      '  * Third check: count missing fields in the row:',
+      '    - If >30% fields missing → REMOVE the entire row',
+      '    - If ≤30% fields missing → KEEP row and fill ALL missing values using these rules:',
+      '  * For kept rows with missing values, fill based on column type:',
+      '    - Numeric columns (age, weight, height, income, etc.): calculate mean/median of that column, fill missing cells with the mean (rounded appropriately)',
+      '    - Text columns (city, name, status, etc.): find the MOST COMMON value (mode) in that column and fill missing cells with that value',
+      '    - Date columns: find the MOST COMMON date in that column and fill missing cells with that date',
+      '    - Gender/category columns: find the MOST COMMON category and fill missing cells with that value',
+      '  * IMPORTANT: Calculate mean/mode BEFORE filling, then apply to all missing cells in that column',
+      '  * Each row MUST have same number of columns as header',
+      '  * Do NOT remove columns, do NOT shift data, do NOT leave any empty cells',
+      '- For date columns: standardize to YYYY-MM-DD format',
+      '- Do NOT invent data, do NOT add new rows, do NOT skip columns'
+    ];
+    
+    // Combine base instructions with additional user-selected options
+    const allInstructions = [...baseInstructions, ...additionalInstructions];
+    
     const systemPrompt = (payload?.notes ? payload.notes + '\n\n' : '') +
       'You are a data cleaning assistant. Clean the CSV data and return it in the "data" field as a 2D array. The first inner array is the header row.\n' +
-      '- Trim whitespace from all cells\n' +
-      '- Remove exact duplicate rows (keep first)\n' +
-      '- For numeric columns: remove invalid characters, keep numbers only\n' +
-      '- For date columns: standardize format if possible\n' +
-      '- Use empty string for missing/unparseable values\n' +
-      '- Do NOT invent data';
+      allInstructions.join('\n');
     const userPrompt = 'Original CSV:\n' + csvText;
 
     if (csvText.length > MAX_CHARS || this.estimateTokens(systemPrompt + userPrompt) > MAX_TOKENS) {
@@ -194,6 +240,7 @@ IMPORTANT: Speak naturally about UI elements users can see. DON'T expose technic
         { role: 'user', content: userPrompt },
       ],
       temperature: 0,
+      max_tokens: MAX_OUTPUT_TOKENS,
       response_format: {
         type: 'json_schema',
         json_schema: {
@@ -252,18 +299,55 @@ IMPORTANT: Speak naturally about UI elements users can see. DON'T expose technic
         }
         try {
           const data = text ? JSON.parse(text) : null;
-          const content = data?.choices?.[0]?.message?.content ?? text;
-          this.logger.log(`[sendCleanRequest] Extracted content length: ${content?.length || 0}`);
+          const content = data?.choices?.[0]?.message?.content ?? '';
+          const finishReason = data?.choices?.[0]?.finish_reason;
+          
+          // Log more details for debugging
+          this.logger.log(`[sendCleanRequest] API response structure detected: ${data?.choices ? 'YES' : 'NO'}`);
+          this.logger.log(`[sendCleanRequest] Content extracted: ${content ? 'YES' : 'NO'}, length: ${content?.length || 0}`);
+          this.logger.log(`[sendCleanRequest] Finish reason: ${finishReason}`);
+          
+          // If no content extracted, log what we got
+          if (!content) {
+            this.logger.error(`[sendCleanRequest] No content in response! Full response preview: ${text?.substring(0, 500)}`);
+            throw new Error('No content in API response');
+          }
+          
+          // Check if response was truncated
+          if (finishReason === 'length') {
+            this.logger.warn(`[sendCleanRequest] Response truncated by token limit`);
+            // Don't retry on truncation - the data is too large
+            throw new InternalServerErrorException('Data chunk too large for AI processing. This will be handled by automatic chunking.');
+          }
+          
+          // Validate JSON is complete (has closing braces)
+          const trimmedContent = (content || '').trim();
+          if (trimmedContent && !trimmedContent.endsWith('}') && !trimmedContent.endsWith(']')) {
+            this.logger.error(`[sendCleanRequest] Response appears truncated: last 50 chars = ${trimmedContent.slice(-50)}`);
+            throw new InternalServerErrorException('AI returned incomplete JSON');
+          }
+          
           return content;
         } catch (parseErr) {
-          this.logger.warn(`[sendCleanRequest] Failed to parse JSON, returning raw text`);
-          return text;
+          this.logger.error(`[sendCleanRequest] Failed to parse API response: ${parseErr.message}`);
+          this.logger.error(`[sendCleanRequest] Response text preview: ${text?.substring(0, 200)}`);
+          throw new Error(`Failed to parse API response: ${parseErr.message}`);
         }
       } catch (err: any) {
         this.logger.error(`[sendCleanRequest] Attempt ${attempt + 1} failed: ${err?.message || err}`);
+        
+        // Don't retry on truncation or timeout - these won't be fixed by retrying
         if (err?.name === 'AbortError') {
           this.logger.error(`[sendCleanRequest] Request timed out after ${REQUEST_TIMEOUT}ms`);
+          throw err;
         }
+        
+        // Check for 'too large' in message (works for both Error and InternalServerErrorException)
+        if (err?.message?.includes('too large')) {
+          this.logger.error(`[sendCleanRequest] Data too large, won't retry`);
+          throw err;
+        }
+        
         if (attempt === maxRetries) {
           this.logger.error(`[sendCleanRequest] All retries exhausted, throwing error`);
           throw err;
@@ -288,20 +372,42 @@ IMPORTANT: Speak naturally about UI elements users can see. DON'T expose technic
     const cleanedCsv = await this.sendCleanRequest(csvText, payload);
     
     this.logger.log(`[cleanCsv] Got response, length: ${cleanedCsv?.length || 0} chars`);
+    this.logger.debug(`[cleanCsv] Response starts with: ${cleanedCsv?.substring(0, 100)}`);
+    this.logger.debug(`[cleanCsv] Response ends with: ${cleanedCsv?.substring(Math.max(0, cleanedCsv.length - 100))}`);
+    
+    // Validate response isn't empty or too small
+    if (!cleanedCsv || cleanedCsv.trim().length < 10) {
+      this.logger.error(`[cleanCsv] Response too short or empty`);
+      throw new InternalServerErrorException('AI returned empty response');
+    }
     
     // Parse JSON response with structured output format: {"data": [[...]]}
     let rows: any[][] = [];
     try {
+      this.logger.debug(`[cleanCsv] Attempting to parse JSON...`);
       const parsed = JSON.parse(cleanedCsv);
+      this.logger.debug(`[cleanCsv] JSON parsed successfully, checking structure...`);
+      
       if (parsed && Array.isArray(parsed.data)) {
         rows = parsed.data;
+        this.logger.log(`[cleanCsv] Found data array with ${rows.length} rows`);
       } else if (Array.isArray(parsed)) {
         rows = parsed; // fallback if AI returns array directly
+        this.logger.log(`[cleanCsv] Using parsed array directly with ${rows.length} rows`);
       } else {
+        this.logger.error(`[cleanCsv] Invalid structure. Type: ${typeof parsed}, Has data: ${!!parsed?.data}, Keys: ${Object.keys(parsed || {}).join(', ')}`);
         throw new Error('Invalid response structure');
       }
     } catch (err) {
       this.logger.error(`[cleanCsv] Failed to parse JSON response: ${err.message}`);
+      this.logger.error(`[cleanCsv] Response preview (first 500 chars): ${cleanedCsv?.substring(0, 500)}`);
+      this.logger.error(`[cleanCsv] Response preview (last 500 chars): ${cleanedCsv?.substring(Math.max(0, cleanedCsv.length - 500))}`);
+      
+      // Check if it's a truncation issue
+      if (err.message?.includes('Unterminated') || err.message?.includes('Unexpected end')) {
+        throw new InternalServerErrorException('AI response was truncated - your data may be too large. Try uploading a smaller file.');
+      }
+      
       throw new InternalServerErrorException('AI returned invalid JSON format');
     }
     
@@ -310,7 +416,153 @@ IMPORTANT: Speak naturally about UI elements users can see. DON'T expose technic
     return { data: rows, rowCount: rows.length, columnCount: rows[0]?.length || 0 };
   }
 
-  /** ========================= EXCEL / CSV PARSING ========================= */
+  /** ========================= LARGE CSV TEXT CLEAN (with progress) ========================= */
+  async cleanLargeCsvText(input: { csvText: string; options?: any }) {
+    const { csvText, options } = input;
+    if (!csvText) throw new BadRequestException('CSV text is required');
+    
+    this.logger.log(`[cleanLargeCsvText] Starting, CSV length: ${csvText.length} chars`);
+    
+    // Parse CSV text into rows
+    const rows = this.csvToRows(csvText);
+    if (!rows.length) throw new BadRequestException('No rows found in CSV');
+    
+    const header = rows[0];
+    const defaultRowsPerChunk = 200;
+    const chunks: any[][][] = [];
+    
+    // Split into chunks
+    for (let i = 1; i < rows.length; i += defaultRowsPerChunk) {
+      chunks.push(rows.slice(i, i + defaultRowsPerChunk));
+    }
+    
+    this.logger.log(`[cleanLargeCsvText] Split into ${chunks.length} chunks`);
+    
+    const results: any[][][] = [];
+    const concurrency = Math.min(3, chunks.length);
+    const inflight: Promise<void>[] = [];
+    let completedCount = 0;
+    
+    // Emit initial progress
+    if (options?.onProgress) {
+      options.onProgress(0, chunks.length);
+    }
+    
+    const schedule = (chunk: any[][], idx: number) => {
+      const task = (async () => {
+        const subResults: any[][] = [];
+        
+        // Sub-chunking logic (same as cleanLargeCsvToMatrix)
+        const makeSubchunks = async (rows: any[][]) => {
+          const out: any[][][] = [];
+          let current: any[][] = [];
+          for (const r of rows) {
+            current.push(r);
+            const csv = await this.rowsToCsv([header, ...current]);
+            if (csv.length >= this.CLEAN_MAX_CHARS * 0.8) {
+              current.pop();
+              if (current.length === 0) {
+                out.push([r]);
+                current = [];
+              } else {
+                out.push(current.slice());
+                current = [r];
+              }
+            }
+          }
+          if (current.length) out.push(current.slice());
+          return out;
+        };
+        
+        const subchunks = await makeSubchunks(chunk);
+        
+        for (let subIndex = 0; subIndex < subchunks.length; subIndex++) {
+          const sub = subchunks[subIndex];
+          const csv = await this.rowsToCsv([header, ...sub]);
+          
+          try {
+            const cleaned = await this.cleanCsv({ csv, notes: options?.notes } as any);
+            if (Array.isArray(cleaned?.data) && cleaned.data.length) {
+              subResults.push(...cleaned.data.slice(1)); // skip header
+            } else {
+              this.logger.warn(`Chunk ${idx} sub ${subIndex}: AI returned no cleaned rows`);
+            }
+          } catch (err) {
+            this.logger.error(`Chunk ${idx} sub ${subIndex} failed: ${err.message}`);
+            
+            if (err.message?.includes('too large')) {
+              this.logger.log(`Chunk ${idx} sub ${subIndex} still too large, splitting further...`);
+              
+              const midpoint = Math.floor(sub.length / 2);
+              if (midpoint > 0) {
+                const firstHalf = sub.slice(0, midpoint);
+                const secondHalf = sub.slice(midpoint);
+                
+                try {
+                  const csv1 = await this.rowsToCsv([header, ...firstHalf]);
+                  const cleaned1 = await this.cleanCsv({ csv: csv1, notes: options?.notes } as any);
+                  if (Array.isArray(cleaned1?.data) && cleaned1.data.length) {
+                    subResults.push(...cleaned1.data.slice(1));
+                  }
+                } catch (err1) {
+                  this.logger.error(`First half of chunk ${idx}.${subIndex} failed: ${err1.message}`);
+                }
+                
+                try {
+                  const csv2 = await this.rowsToCsv([header, ...secondHalf]);
+                  const cleaned2 = await this.cleanCsv({ csv: csv2, notes: options?.notes } as any);
+                  if (Array.isArray(cleaned2?.data) && cleaned2.data.length) {
+                    subResults.push(...cleaned2.data.slice(1));
+                  }
+                } catch (err2) {
+                  this.logger.error(`Second half of chunk ${idx}.${subIndex} failed: ${err2.message}`);
+                }
+              } else {
+                this.logger.error(`Cannot split further - single row too large`);
+              }
+            }
+          }
+        }
+        
+        results[idx] = [header, ...subResults];
+        
+        // Report progress
+        completedCount++;
+        if (options?.onProgress) {
+          options.onProgress(completedCount, chunks.length);
+        }
+      })();
+      
+      inflight.push(task);
+      task.finally(() => {
+        const i = inflight.indexOf(task);
+        if (i >= 0) inflight.splice(i, 1);
+      });
+      return task;
+    };
+    
+    chunks.forEach((chunk, idx) => schedule(chunk, idx));
+    await Promise.all(inflight);
+    
+    // Merge & deduplicate
+    const merged: any[][] = [header];
+    const seen = new Set<string>();
+    results.forEach(chunkRows => {
+      chunkRows.slice(1).forEach(row => {
+        const key = JSON.stringify(row);
+        if (!seen.has(key)) {
+          seen.add(key);
+          merged.push(row);
+        }
+      });
+    });
+    
+    this.logger.log(`[cleanLargeCsvText] Completed, merged ${merged.length - 1} rows (deduplicated)`);
+    
+    return { data: merged, rowCount: merged.length, columnCount: merged[0]?.length || 0 };
+  }
+
+  /** ========================= EXCEL / CSV PARSING =========================*/
   private async resolveFileBuffer(file: any): Promise<Buffer> {
     if (file?.buffer) return file.buffer as Buffer;
     if (file?.path) {
@@ -369,7 +621,7 @@ IMPORTANT: Speak naturally about UI elements users can see. DON'T expose technic
   if (!rows.length) throw new BadRequestException('No rows found');
 
   const header = rows[0];
-  const defaultRowsPerChunk = options?.rowsPerChunk ?? 500; // giảm chunk nhỏ hơn
+  const defaultRowsPerChunk = options?.rowsPerChunk ?? 200; // Reduced to 200 rows per chunk
   const chunks: any[][][] = [];
 
   // Chia thành các chunks nhỏ
@@ -398,7 +650,8 @@ IMPORTANT: Speak naturally about UI elements users can see. DON'T expose technic
         for (const r of rows) {
           current.push(r);
           const csv = await this.rowsToCsv([header, ...current]);
-          if (csv.length >= this.CLEAN_MAX_CHARS) {
+          // Use 80% of max as safety margin
+          if (csv.length >= this.CLEAN_MAX_CHARS * 0.8) {
             current.pop();
             if (current.length === 0) {
               out.push([r]);
@@ -418,11 +671,52 @@ IMPORTANT: Speak naturally about UI elements users can see. DON'T expose technic
       for (let subIndex = 0; subIndex < subchunks.length; subIndex++) {
         const sub = subchunks[subIndex];
         const csv = await this.rowsToCsv([header, ...sub]);
-        const cleaned = await this.cleanCsv({ csv, notes: options?.notes } as any);
-        if (Array.isArray(cleaned?.data) && cleaned.data.length) {
-          subResults.push(...cleaned.data.slice(1)); // bỏ header
-        } else {
-          this.logger.warn(`Chunk ${idx} sub ${subIndex}: AI returned no cleaned rows`);
+        
+        try {
+          const cleaned = await this.cleanCsv({ csv, notes: options?.notes } as any);
+          if (Array.isArray(cleaned?.data) && cleaned.data.length) {
+            subResults.push(...cleaned.data.slice(1)); // bỏ header
+          } else {
+            this.logger.warn(`Chunk ${idx} sub ${subIndex}: AI returned no cleaned rows`);
+          }
+        } catch (err) {
+          this.logger.error(`Chunk ${idx} sub ${subIndex} failed: ${err.message}`);
+          
+          // If chunk still too large, split it further
+          if (err.message?.includes('too large')) {
+            this.logger.log(`Chunk ${idx} sub ${subIndex} still too large (${csv.length} chars), splitting further...`);
+            
+            // Split this subchunk in half and retry
+            const midpoint = Math.floor(sub.length / 2);
+            if (midpoint > 0) {
+              const firstHalf = sub.slice(0, midpoint);
+              const secondHalf = sub.slice(midpoint);
+              
+              // Try first half
+              try {
+                const csv1 = await this.rowsToCsv([header, ...firstHalf]);
+                const cleaned1 = await this.cleanCsv({ csv: csv1, notes: options?.notes } as any);
+                if (Array.isArray(cleaned1?.data) && cleaned1.data.length) {
+                  subResults.push(...cleaned1.data.slice(1));
+                }
+              } catch (err1) {
+                this.logger.error(`First half of chunk ${idx}.${subIndex} failed: ${err1.message}`);
+              }
+              
+              // Try second half
+              try {
+                const csv2 = await this.rowsToCsv([header, ...secondHalf]);
+                const cleaned2 = await this.cleanCsv({ csv: csv2, notes: options?.notes } as any);
+                if (Array.isArray(cleaned2?.data) && cleaned2.data.length) {
+                  subResults.push(...cleaned2.data.slice(1));
+                }
+              } catch (err2) {
+                this.logger.error(`Second half of chunk ${idx}.${subIndex} failed: ${err2.message}`);
+              }
+            } else {
+              this.logger.error(`Cannot split further - single row too large`);
+            }
+          }
         }
       }
 

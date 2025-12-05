@@ -107,10 +107,27 @@ export class AiCleanJobService {
       } else if (typeof cleanPayload?.csv === 'string') {
         // Raw CSV text path
         this.logger.log(`[Job ${jobId}] Detected raw CSV text (length: ${cleanPayload.csv.length} chars)`);
-        this.logger.log(`[Job ${jobId}] Calling aiService.cleanCsv...`);
-        const start = Date.now();
-        result = await this.aiService.cleanCsv({ ...cleanPayload, onProgress });
-        this.logger.log(`[Job ${jobId}] cleanCsv completed in ${Date.now() - start}ms`);
+        
+        // Check if CSV is large enough to need chunking
+        const rows = cleanPayload.csv.split('\n').filter(l => l.trim());
+        if (rows.length > 100) {
+          // Large CSV: use chunked cleaning with progress tracking
+          this.logger.log(`[Job ${jobId}] Large CSV (${rows.length} rows), using chunked cleaning...`);
+          const start = Date.now();
+          result = await this.aiService.cleanLargeCsvText({ 
+            csvText: cleanPayload.csv, 
+            options: { ...cleanPayload, onProgress } 
+          });
+          this.logger.log(`[Job ${jobId}] Chunked CSV cleaning completed in ${Date.now() - start}ms`);
+        } else {
+          // Small CSV: direct cleaning (single chunk, emit progress as 1/1)
+          this.logger.log(`[Job ${jobId}] Small CSV (${rows.length} rows), direct cleaning...`);
+          if (onProgress) onProgress(0, 1);
+          const start = Date.now();
+          result = await this.aiService.cleanCsv(cleanPayload);
+          this.logger.log(`[Job ${jobId}] Direct cleanCsv completed in ${Date.now() - start}ms`);
+          if (onProgress) onProgress(1, 1);
+        }
       } else {
         this.logger.error(`[Job ${jobId}] Unsupported payload: no file or csv text found`);
         throw new Error('Unsupported clean payload: missing file or csv text');
