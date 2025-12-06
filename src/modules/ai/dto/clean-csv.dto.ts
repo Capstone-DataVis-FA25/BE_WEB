@@ -44,6 +44,35 @@ export class CleanCsvDto {
   @MaxLength(5_000)
   notes?: string;
 
+  // Cleaning options checkboxes
+  @ApiPropertyOptional({ description: 'Remove duplicate rows', example: true })
+  @IsOptional()
+  removeDuplicates?: boolean;
+
+  @ApiPropertyOptional({ description: 'Fix data types (convert strings to numbers, etc)', example: true })
+  @IsOptional()
+  fixDataTypes?: boolean;
+
+  @ApiPropertyOptional({ description: 'Handle missing values (empty cells)', example: true })
+  @IsOptional()
+  handleMissingValues?: boolean;
+
+  @ApiPropertyOptional({ description: 'Remove or cap outliers in numeric columns', example: false })
+  @IsOptional()
+  removeOutliers?: boolean;
+
+  @ApiPropertyOptional({ description: 'Standardize formats (dates, phone numbers, etc)', example: true })
+  @IsOptional()
+  standardizeFormats?: boolean;
+
+  @ApiPropertyOptional({ description: 'Validate domain constraints', example: false })
+  @IsOptional()
+  validateDomain?: boolean;
+
+  @ApiPropertyOptional({ description: 'Standardize units (convert to consistent units)', example: false })
+  @IsOptional()
+  standardizeUnits?: boolean;
+
   @ApiPropertyOptional({ description: 'User ID thực hiện clean (dùng cho async job)', example: 'user-123' })
   @IsOptional()
   @IsString()
