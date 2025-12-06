@@ -211,6 +211,8 @@ export class AiChartEvaluationService {
 
     // 4. Build AI prompt
     const language = dto.language || "vi";
+
+// System prompt with evaluation criteria
     const systemPrompt = `You are an expert data visualization analyst. You will evaluate charts based on:
 1. Data visualization best practices
 2. Chart type appropriateness for the data
@@ -241,48 +243,61 @@ When analyzing a chart image and dataset, please provide:
 5. General improvement suggestions or deeper insights if any:
 - What additional metrics, groups, or data components should be analyzed based on the dataset?
 
+6. Propose additional visualization directions:
+- Suggest other visualization formats (dashboards, combined charts, small multiples, heatmaps, maps, distribution plots, etc.) that can further reveal insights.
+- Recommend multi-chart layouts or storytelling flows to enhance analysis.
+- Propose interactive visualization ideas (filters, drill-down, tooltips, segmented views).
+
 Note: If the image is unclear or not a valid chart image, notify the user with an error message.
 
 Provide constructive feedback and specific recommendations for improvement.
 Answer in language: ${language}.`;
 
-    let userPrompt = `I have a chart with the following details:
+// Build user prompt with dataset info and questions
+    let userPrompt = `
+I have a chart with the following details:
 
-**Dataset Information:**
+<strong>Dataset Information:</strong>
 - Total Rows: ${datasetInfo.totalRows}
 - Total Columns: ${datasetInfo.totalColumns}
 - Columns: ${datasetInfo.headers.map((h) => `${h.name} (${h.type})`).join(", ")}
 
-**Dataset Sample (first ${sampleSize} rows):**
-\`\`\`
-${JSON.stringify(datasetSample, null, 2)}
-\`\`\`
+<strong>Dataset Sample (first ${sampleSize} rows):</strong>
+<pre>${JSON.stringify(datasetSample, null, 2)}</pre>
 `;
 
     if (dto.questions && dto.questions.length > 0) {
-      userPrompt += `\n**Specific Questions:**\n${dto.questions.map((q, i) => `${i + 1}. ${q}`).join("\n")}\n`;
+      userPrompt += `
+<strong>Specific Questions:</strong>
+${dto.questions.map((q, i) => `${i + 1}. ${q}`).join("<br>")}
+`;
     }
 
-    userPrompt += `\nPlease analyze the chart image and the dataset, then provide your response in clean HTML format.
+    userPrompt += `
+Please analyze the chart image and the dataset using the required evaluation structure.
 
-  Use simple HTML structure:
-  - Use <h2> for section titles with style="color: #2563eb; font-size: 1.125rem; font-weight: 600; margin-top: 1.5rem; margin-bottom: 0.75rem; padding-bottom: 0.5rem;"
-  - Use <p> for paragraphs with style="margin-bottom: 0.75rem; line-height: 1.6; color: #ffffff;"
-  - Use <ul> for lists with style="list-style-type: disc; margin-left: 1.5rem; margin-bottom: 0.75rem; padding-left: 1rem;"
-  - Use <li> with style="margin-bottom: 0.5rem; line-height: 1.6; display: list-item;"
-  - Use <strong> for emphasis
+Return the final output in clean HTML format only.
 
-  For each section, prefix the <h2> title with its number (e.g. "1. Đánh giá tổng quan về chất lượng biểu đồ", "2. Điểm mạnh của hình ảnh hiện tại", ...).
+Use simple HTML structure:
+- <h2> for section titles with style="color: #2563eb; font-size: 1.125rem; font-weight: 600; margin-top: 1.5rem; margin-bottom: 0.75rem; padding-bottom: 0.5rem;"
+- <p> for paragraphs with style="margin-bottom: 0.75rem; line-height: 1.6; color: #ffffff;"
+- <ul> with style="list-style-type: disc; margin-left: 1.5rem; margin-bottom: 0.75rem; padding-left: 1rem;"
+- <li> with style="margin-bottom: 0.5rem; line-height: 1.6; display: list-item;"
+- <strong> for emphasis.
 
-  Provide analysis covering:
-  1. Overall assessment of the chart quality
-  2. Strengths of the current visualization
-  3. Weaknesses or areas for improvement
-  4. Specific recommendations
-  5. Additional insights
-  6. Answers to any specific questions asked
+Each section must have a numbered <h2> title (e.g., "1. Summary of the Chart", "2. Suitability Evaluation", ...).
 
-  Return ONLY the HTML content without markdown code blocks or backticks.`;
+Your response MUST cover:
+1. Overall assessment of the chart quality 
+2. Strengths of the current visualization 
+3. Weaknesses or areas for improvement
+4. Specific recommendations 
+5. Additional insights
+6. Additional visualization directions
+
+Return ONLY the HTML content without markdown or backticks.
+Answer in language: ${language}.
+`;
 
     // 5. Call OpenRouter API with vision
     const modelMessages = [
@@ -304,7 +319,7 @@ ${JSON.stringify(datasetSample, null, 2)}
       },
     ];
 
-    console.log("userPrompt", userPrompt)
+    console.log("userPrompt", userPrompt);
 
     const body = {
       model: "openai/gpt-4o-mini", // Use GPT-4o-mini with vision (more stable)
