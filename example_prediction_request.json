@@ -1,0 +1,19 @@
+{
+  "dailySales": [
+    { "date": "2010-12-01", "quantity": 15234 },
+    { "date": "2010-12-02", "quantity": 16789 },
+    { "date": "2010-12-03", "quantity": 14567 },
+    { "date": "2010-12-04", "quantity": 18234 },
+    { "date": "2010-12-05", "quantity": 19456 },
+    { "date": "2010-12-06", "quantity": 17890 },
+    { "date": "2010-12-07", "quantity": 20123 },
+    { "date": "2010-12-08", "quantity": 21456 },
+    { "date": "2010-12-09", "quantity": 19876 },
+    { "date": "2010-12-10", "quantity": 22345 },
+    { "date": "2010-12-11", "quantity": 23456 },
+    { "date": "2010-12-12", "quantity": 21987 },
+    { "date": "2010-12-13", "quantity": 24567 },
+    { "date": "2010-12-14", "quantity": 25678 }
+  ],
+  "country": "United Kingdom"
+}

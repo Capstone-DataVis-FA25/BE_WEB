@@ -24,6 +24,7 @@ import { ActivityAuditInterceptor } from "./interceptors/activity-audit.intercep
 import { SubscriptionPlansModule } from "@modules/subscription-plans/subscription-plans.module";
 import { PaymentsModule } from "@modules/payments/payments.module";
 import { UploadModule } from "@modules/upload/upload.module";
+import { PredictionModule } from "@modules/prediction/prediction.module";
 
 @Module({
   imports: [
@@ -66,6 +67,7 @@ import { UploadModule } from "@modules/upload/upload.module";
     SubscriptionPlansModule,
     PaymentsModule,
     UploadModule,
+    PredictionModule,
   ],
   controllers: [AppController],
   providers: [
