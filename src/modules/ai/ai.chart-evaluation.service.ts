@@ -28,7 +28,7 @@ export class AiChartEvaluationService {
     return {
       "Content-Type": "application/json",
       Authorization: `Bearer ${this.apiKey}`,
-      "HTTP-Referer": "http://localhost:3000",
+      "HTTP-Referer": this.configService.get<string>('APP_URL') || "http://localhost:3000",
       "X-Title": "DataVis Chart Evaluator",
     };
   }
