@@ -319,7 +319,7 @@ Answer in language: ${language}.
       },
     ];
 
-    console.log("userPrompt", userPrompt);
+    this.logger.debug(`[evaluateChart] User prompt: ${userPrompt}`);
 
     const body = {
       model: "openai/gpt-4o-mini", // Use GPT-4o-mini with vision (more stable)
