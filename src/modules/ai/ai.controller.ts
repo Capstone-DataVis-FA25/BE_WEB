@@ -1,4 +1,4 @@
-import { Controller, Post, Body, HttpException, HttpStatus, UploadedFile, UseInterceptors, HttpCode, Query, Get, Req } from '@nestjs/common';
+import { Controller, Post, Body, HttpException, HttpStatus, UploadedFile, UseInterceptors, HttpCode, Query, Get, Req, UseGuards, Request } from '@nestjs/common';
 import { ApiBody, ApiConsumes, ApiOkResponse, ApiOperation, ApiTags, ApiQuery, ApiBearerAuth } from '@nestjs/swagger';
 import { FileInterceptor } from '@nestjs/platform-express';
 import { diskStorage } from 'multer';
@@ -7,6 +7,11 @@ import { CleanCsvDto } from './dto/clean-csv.dto';
 import { CleanExcelUploadDto } from './dto/clean-excel.dto';
 import { ChatWithAiDto } from './dto/chat-with-ai.dto';
 import { AiCleanJobService } from './ai.clean.job';
+import { EvaluateChartDto } from './dto/evaluate-chart.dto';
+import { AiChartEvaluationService } from './ai.chart-evaluation.service';
+import { JwtAccessTokenGuard } from '@modules/auth/guards/jwt-access-token.guard';
+import { AuthRequest } from '@modules/auth/auth.controller';
+
 
 @ApiTags('ai')
 @ApiBearerAuth()
@@ -15,6 +20,7 @@ export class AiController {
   constructor(
     private readonly aiService: AiService,
     private readonly aiCleanJobService: AiCleanJobService,
+    private readonly aiChartEvaluationService: AiChartEvaluationService,
   ) {}
 
   @Post('chat-with-ai')
@@ -234,6 +240,38 @@ export class AiController {
     return { code: 200, message: 'Success', data: ids };
   }
 
+  @Post('evaluate-chart')
+  @UseGuards(JwtAccessTokenGuard)
+  @HttpCode(HttpStatus.OK)
+  @ApiOperation({ 
+    summary: 'Evaluate a chart using AI based on its image and dataset',
+    description: 'Send chart image (base64) and chart ID to get AI-powered evaluation and recommendations'
+  })
+  @ApiBody({ type: EvaluateChartDto })
+  @ApiOkResponse({ 
+    description: 'Chart evaluation completed successfully',
+    schema: {
+      type: 'object',
+      properties: {
+        success: { type: 'boolean' },
+        evaluation: { type: 'string' },
+        chartInfo: { type: 'object' },
+        datasetInfo: { type: 'object' },
+        processingTime: { type: 'number' }
+      }
+    }
+  })
+  async evaluateChart(@Body() dto: EvaluateChartDto, @Request() req: AuthRequest) {
+    try {
+      const result = await this.aiChartEvaluationService.evaluateChart(dto, req.user.userId);
+      return result;
+    } catch (e: any) {
+      throw new HttpException(
+        { success: false, message: e.message }, 
+        e.status || HttpStatus.INTERNAL_SERVER_ERROR
+      );
+    }
+  }
   @Get('clean-progress')
   @ApiOperation({ summary: 'Get current cleaning progress for a jobId' })
   @ApiQuery({ name: 'jobId', required: true, description: 'Job ID to check progress' })
