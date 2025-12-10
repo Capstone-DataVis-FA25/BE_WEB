@@ -31,6 +31,30 @@ export class PaymentsController {
         return this.paymentsService.createCheckout(userId, planId, returnUrl);
     }
 
+    @Get('my-transactions')
+    @UseGuards(JwtAccessTokenGuard)
+    @ApiBearerAuth()
+    @ApiOperation({ summary: 'Get current user payment transaction history' })
+    @ApiQuery({ name: 'page', required: false, type: Number, example: 1 })
+    @ApiQuery({ name: 'limit', required: false, type: Number, example: 10 })
+    async getMyTransactions(@Request() req: any) {
+        const userId = req.user?.userId || req.user?.id;
+        const { page = '1', limit = '10' } = req.query || {};
+        const pageNum = Number(page) > 0 ? Number(page) : 1;
+        const limitNum = Number(limit) > 0 ? Number(limit) : 10;
+        const result = await this.paymentsService.getUserTransactions(userId, {
+            page: pageNum,
+            limit: limitNum,
+        });
+        return {
+            data: result.data,
+            page: pageNum,
+            limit: limitNum,
+            total: result.total,
+            totalPages: Math.ceil((result.total || 0) / limitNum),
+        };
+    }
+
     @Get('transactions')
     @UseGuards(JwtAccessTokenGuard)
     @ApiBearerAuth()

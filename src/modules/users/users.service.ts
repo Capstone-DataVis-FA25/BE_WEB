@@ -246,6 +246,70 @@ export class UsersService {
     return { user: updatedUser };
   }
 
+  // Get user resource usage
+  async getResourceUsage(userId: string) {
+    // Get user with subscription plan
+    const user = await this.prismaService.prisma.user.findUnique({
+      where: { id: userId },
+      include: {
+        subscriptionPlan: true,
+      },
+    });
+
+    if (!user) {
+      throw new NotFoundException(Messages.USER_NOT_FOUND);
+    }
+
+    // Count datasets and charts directly from their tables
+    const [datasetsCount, chartsCount] = await Promise.all([
+      this.prismaService.prisma.dataset.count({ where: { userId } }),
+      this.prismaService.prisma.chart.count({ where: { userId } }),
+    ]);
+
+    // Get AI requests count directly from User model
+    const aiRequestsCount = user.aiRequestsCount || 0;
+
+    // Get limits from subscription plan
+    const limits = user.subscriptionPlan?.limits as any || {};
+    const maxDatasets = limits?.maxDatasets || null;
+    const maxCharts = limits?.maxCharts || null;
+    const maxAIRequests = limits?.maxAIRequests || null;
+
+    // Calculate percentages
+    const datasetsPercentage = maxDatasets ? Math.round((datasetsCount / maxDatasets) * 100) : 0;
+    const chartsPercentage = maxCharts ? Math.round((chartsCount / maxCharts) * 100) : 0;
+    const aiRequestsPercentage = maxAIRequests ? Math.round((aiRequestsCount / maxAIRequests) * 100) : 0;
+
+    // Check if nearing limits (>80%)
+    const warnings: string[] = [];
+    if (datasetsPercentage >= 80) warnings.push('datasets');
+    if (chartsPercentage >= 80) warnings.push('charts');
+    if (aiRequestsPercentage >= 80) warnings.push('aiRequests');
+
+    return {
+      usage: {
+        datasetsCount,
+        chartsCount,
+        aiRequestsCount,
+      },
+      limits: {
+        maxDatasets,
+        maxCharts,
+        maxAIRequests,
+      },
+      percentage: {
+        datasets: datasetsPercentage,
+        charts: chartsPercentage,
+        aiRequests: aiRequestsPercentage,
+      },
+      warnings,
+      subscriptionPlan: user.subscriptionPlan ? {
+        id: user.subscriptionPlan.id,
+        name: user.subscriptionPlan.name,
+      } : null,
+    };
+  }
+
   // Lock or unlock a user (admin functionality)
   async lockUnlockUser(
     userId: string,
