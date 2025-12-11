@@ -193,6 +193,36 @@ export class PaymentsService {
         };
     }
 
+    // Get user-specific payment transactions
+    async getUserTransactions(userId: string, { page = 1, limit = 10 }: { page?: number; limit?: number }) {
+        const where = { userId };
+        const [items, total] = await Promise.all([
+            this.prismaService.prisma.paymentTransaction.findMany({
+                where,
+                orderBy: { createdAt: 'desc' },
+                skip: (page - 1) * limit,
+                take: limit,
+                include: {
+                    subscriptionPlan: {
+                        select: {
+                            id: true,
+                            name: true,
+                            price: true,
+                            currency: true,
+                        },
+                    },
+                },
+            }),
+            this.prismaService.prisma.paymentTransaction.count({ where }),
+        ]);
+        return {
+            data: items,
+            page,
+            limit,
+            total,
+        };
+    }
+
     // Get payment transaction detail by id
     async getTransactionDetail(id: string) {
         const tx = await this.prismaService.prisma.paymentTransaction.findUnique({ where: { id } });
