@@ -8,6 +8,7 @@ import {
 	Delete,
 	UseGuards,
 	Request,
+	Query,
 } from '@nestjs/common';
 import { ApiTags, ApiOperation, ApiResponse, ApiBearerAuth, ApiBody } from '@nestjs/swagger';
 import { UsersService } from './users.service';
@@ -72,6 +73,18 @@ export class UsersController {
 	@ApiResponse({ status: 200, description: 'Resource usage data' })
 	getUserResourceUsageById(@Param('id') id: string) {
 		return this.usersService.getResourceUsage(id);
+	}
+
+	@Get('stats/resource-usage-over-time')
+	@UseGuards(JwtAccessTokenGuard, RolesGuard)
+	@Roles(UserRole.ADMIN)
+	@ApiOperation({ summary: 'Get resource usage statistics over time for all users (Admin only)' })
+	@ApiResponse({ status: 200, description: 'Resource usage statistics' })
+	getResourceUsageOverTime(
+		@Request() req: AuthRequest,
+		@Query('period') period: 'day' | 'week' | 'month' | 'year' = 'week'
+	) {
+		return this.usersService.getResourceUsageOverTime(period);
 	}
 
 	//Change password API
