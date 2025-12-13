@@ -8,10 +8,12 @@ import { PrismaService } from "../../prisma/prisma.service";
 import { CreateSubscriptionPlanDto } from "./dto/create-subscription-plan.dto";
 import { UpdateSubscriptionPlanDto } from "./dto/update-subscription-plan.dto";
 import { Messages } from "src/constant/message-config";
+import { AppConstants } from "src/constant/app.constants";
 
 @Injectable()
 export class SubscriptionPlansService {
     constructor(private readonly prismaService: PrismaService) { }
+    private cachedDefaultPlanId?: string;
 
     async create(createSubscriptionPlanDto: CreateSubscriptionPlanDto) {
         try {
@@ -167,6 +169,29 @@ export class SubscriptionPlansService {
                 `Failed to fetch active subscription plans: ${error.message}`
             );
         }
+    }
+
+    public async getDefaultSubscriptionPlanId(): Promise<string | null> {
+        if (this.cachedDefaultPlanId) {
+            return this.cachedDefaultPlanId;
+        }
+
+        const planName = AppConstants.DEFAULT_SUBSCRIPTION_PLAN_NAME;
+        if (!planName) {
+            return null;
+        }
+
+        const plan = await this.prismaService.prisma.subscriptionPlan.findFirst({
+            where: { name: planName, isActive: true },
+            select: { id: true },
+        });
+
+        if (!plan) {
+            throw new NotFoundException("Default subscription plan not found");
+        }
+
+        this.cachedDefaultPlanId = plan.id;
+        return plan.id;
     }
 
     // Helper method to check if user can create more datasets
