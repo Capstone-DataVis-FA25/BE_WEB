@@ -28,7 +28,8 @@ export class AiChartEvaluationService {
     return {
       "Content-Type": "application/json",
       Authorization: `Bearer ${this.apiKey}`,
-      "HTTP-Referer": this.configService.get<string>('APP_URL') || "http://localhost:3000",
+      "HTTP-Referer":
+        this.configService.get<string>("CLIENT_URL") || "http://localhost:5173",
       "X-Title": "DataVis Chart Evaluator",
     };
   }
@@ -189,6 +190,13 @@ export class AiChartEvaluationService {
       }))
       .sort((a, b) => a.index - b.index);
 
+    // 2.5. Get selected columns from request (sent by frontend)
+    const selectedColumns = dto.selectedColumns || [];
+
+    console.log('selectedColumns: ', selectedColumns);
+    
+    this.logger.debug(`[evaluateChart] Selected columns from frontend: ${selectedColumns.join(', ')}`);
+
     // 3. Build dataset sample (first 50 rows for context)
     const sampleSize = Math.min(50, decryptedHeaders[0]?.data?.length || 0);
     const datasetSample: any[][] = [];
@@ -212,21 +220,44 @@ export class AiChartEvaluationService {
     // 4. Build AI prompt
     const language = dto.language || "vi";
 
-// System prompt with evaluation criteria
-    const systemPrompt = `You are an expert data visualization analyst. You will evaluate charts based on:
-1. Data visualization best practices
-2. Chart type appropriateness for the data
-3. Color scheme and aesthetics
-4. Clarity and readability
-5. Accuracy of data representation
-6. Accessibility considerations
+    // System prompt with evaluation criteria
+    const systemPrompt = `You are an expert data visualization and data analysis specialist. You will evaluate charts with a focus on:
+1. **Detailed data analysis from the chart image**: Read and interpret the actual values, bars, lines, or segments visible in the chart
+2. Data visualization best practices and chart type appropriateness
+3. Statistical insights: comparisons, rankings, trends, and patterns
+4. Color scheme, aesthetics, clarity and readability
+5. Accuracy of data representation and accessibility
 
 When analyzing a chart image and dataset, please provide:
 
-1. Summary of the chart and dataset meaning:
-- What type of chart is this?
-- What issue or topic does the chart represent?
-- What are the notable points or trends from the chart and data?
+1. **Detailed Data Analysis from Chart Image**:
+IMPORTANT: You MUST read and report the actual numeric values visible in the chart image.
+- What type of chart is this? (bar chart, line chart, pie chart, scatter plot, etc.)
+- List the EXACT categories/labels shown on the axes or legend
+- For EACH category/data point visible in the chart:
+  * State the SPECIFIC numeric value or approximate value you can see
+  * Example: "Platform A shows 45,000 revenue, Platform B shows 32,000 revenue, Platform C shows 28,000 revenue"
+  * For bar charts: read the height/length of each bar and state its value
+  * For line charts: identify key data points with their coordinates
+  * For pie charts: state the percentage or value of each slice
+- Provide data comparisons:
+  * Which category has the HIGHEST value? State the exact number
+  * Which category has the LOWEST value? State the exact number
+  * Calculate the difference or ratio between highest and lowest
+  * Identify any categories in the middle range
+  * Are there significant gaps between consecutive values?
+- Statistical summary:
+  * Approximate total/sum if applicable
+  * Average/mean value across categories
+  * Identify any outliers (values significantly higher or lower than others)
+  * Describe the overall distribution pattern (even, skewed, clustered, etc.)
+- Trends and patterns:
+  * Is there an increasing/decreasing trend?
+  * Are there any notable peaks, valleys, or inflection points?
+  * Any seasonal or cyclical patterns visible?
+- Business insights:
+  * What business story does this data tell?
+  * What decisions or actions might these numbers suggest?
 
 2. Evaluate the suitability of the chart with the dataset:
 - Is this chart appropriate for the data type?
@@ -251,19 +282,47 @@ When analyzing a chart image and dataset, please provide:
 Note: If the image is unclear or not a valid chart image, notify the user with an error message.
 
 Provide constructive feedback and specific recommendations for improvement.
-Answer in language: ${language}.`;
+Important: You MUST answer entirely in the following language, with no exceptions: ${language}.  
+Your entire response must be written 100% in ${language}, and you are NOT allowed to use any other language.
+`;
 
-// Build user prompt with dataset info and questions
+    // Build user prompt with dataset info and questions
     let userPrompt = `
-I have a chart with the following details:
+I have a chart visualizing specific columns from a dataset. Please analyze it carefully.
+
+<strong>Chart Configuration:</strong>
+- Chart Type: ${chart.type}
+${selectedColumns.length > 0 ? `- Selected Columns Being Visualized: <strong>${selectedColumns.join(', ')}</strong>` : ''}
 
 <strong>Dataset Information:</strong>
 - Total Rows: ${datasetInfo.totalRows}
 - Total Columns: ${datasetInfo.totalColumns}
-- Columns: ${datasetInfo.headers.map((h) => `${h.name} (${h.type})`).join(", ")}
+- All Available Columns: ${datasetInfo.headers.map((h) => `${h.name} (${h.type})`).join(", ")}
 
 <strong>Dataset Sample (first ${sampleSize} rows):</strong>
 <pre>${JSON.stringify(datasetSample, null, 2)}</pre>
+
+<strong>CRITICAL INSTRUCTIONS:</strong>
+You MUST analyze the chart image in detail and report the specific numeric values you can see.
+${selectedColumns.length > 0 ? `
+This chart is specifically visualizing these columns: <strong>${selectedColumns.join(', ')}</strong>
+Focus your analysis on the relationship between these columns and the patterns visible in the chart data.
+` : ''}
+
+For EACH category visible in the chart, you must:
+1. Read and state the EXACT or APPROXIMATE numeric value shown
+2. Compare values: identify which is highest, lowest, and calculate differences
+3. Provide statistical insights: totals, averages, distributions
+4. Explain what these specific numbers mean in business context
+
+Example of expected analysis:
+"Looking at the chart:
+- Category A shows approximately X (highest)
+- Category B shows approximately Y 
+- Category C shows approximately Z (lowest)
+- The difference between highest and lowest is [X-Z]
+- Category A represents [percentage]% of the total
+- This indicates that..."
 `;
 
     if (dto.questions && dto.questions.length > 0) {
@@ -273,30 +332,54 @@ ${dto.questions.map((q, i) => `${i + 1}. ${q}`).join("<br>")}
 `;
     }
 
+    const requiredSections =
+      language === "vi"
+        ? [
+            "1. Phân tích dữ liệu chi tiết",
+            "2. Đánh giá loại biểu đồ và tính phù hợp",
+            "3. Điểm mạnh của trực quan hóa hiện tại",
+            "4. Điểm yếu hoặc các khía cạnh cần cải thiện",
+            "5. Đề xuất cụ thể",
+            "6. Thông tin chi tiết và thống kê bổ sung",
+            "7. Đề xuất các phương án trực quan hóa thay thế",
+          ]
+        : [
+            "1. Detailed Data Analysis",
+            "2. Chart Type and Suitability Evaluation",
+            "3. Strengths of Current Visualization",
+            "4. Weaknesses or Areas for Improvement",
+            "5. Specific Recommendations",
+            "6. Additional Insights and Statistics",
+            "7. Proposed Visualization Alternatives",
+          ];
+
     userPrompt += `
-Please analyze the chart image and the dataset using the required evaluation structure.
+Please analyze the chart image and dataset following this structure:
 
-Return the final output in clean HTML format only.
+<strong>MANDATORY FIRST SECTION - Detailed Data Reading:</strong>
+Before anything else, you MUST:
+1. Read every visible value/number from the chart image
+2. List each category/label with its corresponding numeric value
+3. State which has the highest value, lowest value, and the exact numbers
+4. Calculate and show comparisons (differences, ratios, percentages)
+5. Provide statistical summary (total, average, distribution)
 
-Use simple HTML structure:
+Then continue with standard evaluation sections.
+
+<strong>HTML Formatting Requirements:</strong>
 - <h2> for section titles with style="color: #2563eb; font-size: 1.125rem; font-weight: 600; margin-top: 1.5rem; margin-bottom: 0.75rem; padding-bottom: 0.5rem;"
-- <p> for paragraphs with style="margin-bottom: 0.75rem; line-height: 1.6; color: #ffffff;"
+- <p> for paragraphs with style="margin-bottom: 0.75rem; line-height: 1.6; color: #fffff;"
 - <ul> with style="list-style-type: disc; margin-left: 1.5rem; margin-bottom: 0.75rem; padding-left: 1rem;"
-- <li> with style="margin-bottom: 0.5rem; line-height: 1.6; display: list-item;"
-- <strong> for emphasis.
+- <li> with style="margin-bottom: 0.5rem; line-height: 1.6; display: list-item; color: #fffff;"
+- <strong> for emphasis and numbers with style="color: #fffff; font-weight: 600;"
+- Use <code> tags for specific values: <code style="background: #1f2937; padding: 0.125rem 0.375rem; border-radius: 0.25rem; color: #fffff;">value</code>
 
-Each section must have a numbered <h2> title (e.g., "1. Summary of the Chart", "2. Suitability Evaluation", ...).
+<strong>Required Sections (use these as h2 headers):</strong>
+${requiredSections.join("\n")}
 
-Your response MUST cover:
-1. Overall assessment of the chart quality 
-2. Strengths of the current visualization 
-3. Weaknesses or areas for improvement
-4. Specific recommendations 
-5. Additional insights
-6. Additional visualization directions
-
-Return ONLY the HTML content without markdown or backticks.
-Answer in language: ${language}.
+Return ONLY clean HTML content without markdown code blocks or backticks.
+Important: You MUST answer entirely in the following language, with no exceptions: ${language}.  
+Your entire response must be written 100% in ${language}, and you are NOT allowed to use any other language.
 `;
 
     // 5. Call OpenRouter API with vision
@@ -322,10 +405,10 @@ Answer in language: ${language}.
     this.logger.debug(`[evaluateChart] User prompt: ${userPrompt}`);
 
     const body = {
-      model: "openai/gpt-4o-mini", // Use GPT-4o-mini with vision (more stable)
+      model: "openai/gpt-4o", // Use GPT-4o (best vision model for chart analysis)
       messages: modelMessages,
       temperature: 0.7,
-      max_tokens: 2000,
+      max_tokens: 3000, // Increased for comprehensive analysis
     };
 
     this.logger.log(
