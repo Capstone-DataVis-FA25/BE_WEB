@@ -11,9 +11,10 @@ import { UsersModule } from "../users/users.module";
 import { GoogleAuthService } from "./google-auth.service";
 import { EmailModule } from "@modules/email/email.module";
 import { RolesGuard } from "./guards/roles.guard";
+import { SubscriptionPlansModule } from "@modules/subscription-plans/subscription-plans.module";
 
 @Module({
-  imports: [UsersModule, PassportModule, EmailModule, JwtModule.register({})],
+  imports: [UsersModule, SubscriptionPlansModule, PassportModule, EmailModule, JwtModule.register({})],
   controllers: [AuthController],
   providers: [
     AuthService,
