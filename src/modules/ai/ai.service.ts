@@ -193,7 +193,7 @@ IMPORTANT: Speak naturally about UI elements users can see. DON'T expose technic
       '- For gender field: standardize to "Male", "Female", "Other" (case-insensitive match)',
       '- For numeric columns:',
       '  * Remove all non-numeric characters except decimal separator',
-      `  * Apply thousand separator: ${payload?.thousandsSeparator || ','}`,
+      `  * Apply thousand separator: ${payload?.thousandsSeparator || ' '}`,
       `  * Apply decimal separator: ${payload?.decimalSeparator || '.'}`,
       '  * Format numbers consistently (e.g., 1000 → 1,000 if thousand separator is comma)',
       '  * Remove outliers that are clearly errors (e.g., weight=6000kg, height=1.70m, age=150)',

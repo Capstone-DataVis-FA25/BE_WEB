@@ -1,3 +1,4 @@
+import { SubscriptionPlansService } from './../subscription-plans/subscription-plans.service';
 import { Injectable, UnauthorizedException } from "@nestjs/common";
 import { OAuth2Client } from "google-auth-library";
 import { ConfigService } from "@nestjs/config";
@@ -11,7 +12,8 @@ export class GoogleAuthService {
 
   constructor(
     private configService: ConfigService,
-    private usersService: UsersService
+    private usersService: UsersService,
+    private subscriptionPlansService: SubscriptionPlansService
   ) {
     this.googleClient = new OAuth2Client(
       this.configService.get<string>("GOOGLE_CLIENT_ID")
@@ -42,12 +44,15 @@ export class GoogleAuthService {
         // Overwrite unverified user with Google account
         await this.usersService.remove(user.id);
 
+        const defaultPlanId = await this.subscriptionPlansService.getDefaultSubscriptionPlanId();
+
         const created = await this.usersService.create({
           email,
           firstName: given_name || "",
           lastName: family_name || "",
           role: UserRole.USER,
           isVerified: true,
+          subscriptionPlanId: defaultPlanId || "",
         });
 
         return created;

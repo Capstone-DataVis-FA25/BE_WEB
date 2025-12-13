@@ -8,6 +8,7 @@ import {
 	Delete,
 	UseGuards,
 	Request,
+	Query,
 } from '@nestjs/common';
 import { ApiTags, ApiOperation, ApiResponse, ApiBearerAuth, ApiBody } from '@nestjs/swagger';
 import { UsersService } from './users.service';
@@ -50,11 +51,40 @@ export class UsersController {
 		return this.usersService.findOne(req.user.userId);
 	}
 
+	@Get('me/resource-usage')
+	@UseGuards(JwtAccessTokenGuard)
+	@ApiOperation({ summary: 'Get current user resource usage and limits' })
+	@ApiResponse({ status: 200, description: 'Resource usage data' })
+	getResourceUsage(@Request() req: AuthRequest) {
+		return this.usersService.getResourceUsage(req.user.userId);
+	}
+
 	@Get(':id')
 	@ApiOperation({ summary: 'Get user by ID' })
 	@ApiResponse({ status: 200, description: 'User found' })
 	findOne(@Param('id') id: string) {
 		return this.usersService.findOne(id);
+	}
+
+	@Get(':id/resource-usage')
+	@UseGuards(JwtAccessTokenGuard, RolesGuard)
+	@Roles(UserRole.ADMIN)
+	@ApiOperation({ summary: 'Get user resource usage by ID (Admin only)' })
+	@ApiResponse({ status: 200, description: 'Resource usage data' })
+	getUserResourceUsageById(@Param('id') id: string) {
+		return this.usersService.getResourceUsage(id);
+	}
+
+	@Get('stats/resource-usage-over-time')
+	@UseGuards(JwtAccessTokenGuard, RolesGuard)
+	@Roles(UserRole.ADMIN)
+	@ApiOperation({ summary: 'Get resource usage statistics over time for all users (Admin only)' })
+	@ApiResponse({ status: 200, description: 'Resource usage statistics' })
+	getResourceUsageOverTime(
+		@Request() req: AuthRequest,
+		@Query('period') period: 'day' | 'week' | 'month' | 'year' = 'week'
+	) {
+		return this.usersService.getResourceUsageOverTime(period);
 	}
 
 	//Change password API
