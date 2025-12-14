@@ -126,7 +126,6 @@ export class DatasetsService {
           createdAt: true,
           updatedAt: true,
           userId: true,
-          // Don't include headers for performance
         },
         orderBy: { createdAt: "desc" },
       });

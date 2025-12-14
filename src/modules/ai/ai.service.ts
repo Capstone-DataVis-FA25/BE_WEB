@@ -1,69 +1,108 @@
-import { Injectable, InternalServerErrorException, Logger, BadRequestException } from '@nestjs/common';
-import { ConfigService } from '@nestjs/config';
-import * as XLSX from 'xlsx';
-import * as fs from 'fs';
-import * as path from 'path';
-import { CleanCsvDto } from './dto/clean-csv.dto';
-import { parse } from 'fast-csv';
-import { Readable } from 'stream';
+import {
+  Injectable,
+  InternalServerErrorException,
+  Logger,
+  BadRequestException,
+} from "@nestjs/common";
+import { ConfigService } from "@nestjs/config";
+import * as XLSX from "xlsx";
+import * as fs from "fs";
+import * as path from "path";
+import { CleanCsvDto } from "./dto/clean-csv.dto";
+import { parse } from "fast-csv";
+import { Readable } from "stream";
 
 @Injectable()
 export class AiService {
   private readonly logger = new Logger(AiService.name);
-  private readonly baseUrl = 'https://openrouter.ai/api/v1';
-  private readonly model = 'google/gemini-2.5-flash-lite-preview-09-2025';
+  private readonly baseUrl = "https://openrouter.ai/api/v1";
+  private readonly model = "google/gemini-2.5-flash-lite-preview-09-2025";
   private readonly apiKey: string;
   // Safety limits used when sending CSV to the AI in a single request
   private readonly CLEAN_MAX_CHARS = 30_000; // Drastically reduced to avoid output token limits
   private readonly CLEAN_MAX_TOKENS = 20_000; // conservative token estimate
 
   constructor(private readonly configService: ConfigService) {
-    this.apiKey = this.configService.get<string>('OPENROUTER_API_KEY') || '';
+    this.apiKey = this.configService.get<string>("OPENROUTER_API_KEY") || "";
   }
 
   private async loadUserGuide(): Promise<string> {
     try {
-      const guidePath = path.join(__dirname, 'USER_GUIDE_DRIVER_STEPS.md');
-      const content = await fs.promises.readFile(guidePath, 'utf8');
+      const guidePath = path.join(__dirname, "USER_GUIDE_DRIVER_STEPS.md");
+      const content = await fs.promises.readFile(guidePath, "utf8");
       return `# DataVis User Guide\n\n${content}`;
     } catch (err) {
-      this.logger.warn('Could not load user guide, continuing without it');
-      return '';
+      this.logger.warn("Could not load user guide, continuing without it");
+      return "";
     }
   }
 
   private getCommonHeaders(apiKey: string) {
     return {
-      'Content-Type': 'application/json',
+      "Content-Type": "application/json",
       Authorization: `Bearer ${apiKey}`,
-      'HTTP-Referer': 'http://localhost:3000', // hoặc domain thật khi deploy
-      'X-Title': 'DataVis Assistant',
+      "HTTP-Referer": "http://localhost:3000", // hoặc domain thật khi deploy
+      "X-Title": "DataVis Assistant",
     };
   }
 
   /** ========================= CHAT AI ========================= */
-  async chatWithAi(message?: string, messagesJson?: string, languageCode?: string) {
-    if (!message) throw new Error('Vui lòng cung cấp message');
-    if (!this.apiKey) throw new InternalServerErrorException('AI service is not configured');
+  async chatWithAi(
+    message?: string,
+    messagesJson?: string,
+    languageCode?: string
+  ) {
+    if (!message) throw new Error("Vui lòng cung cấp message");
+    if (!this.apiKey)
+      throw new InternalServerErrorException("AI service is not configured");
 
-    interface HistMsg { role: 'user' | 'assistant'; content: string; }
+    interface HistMsg {
+      role: "user" | "assistant";
+      content: string;
+    }
     let history: HistMsg[] = [];
     if (messagesJson) {
       try {
         const parsed = JSON.parse(messagesJson);
         if (Array.isArray(parsed))
-          history = parsed.filter(m => m && (m.role === 'user' || m.role === 'assistant') && typeof m.content === 'string');
+          history = parsed.filter(
+            (m) =>
+              m &&
+              (m.role === "user" || m.role === "assistant") &&
+              typeof m.content === "string"
+          );
       } catch {}
     }
 
-    const targetLang = languageCode || 'auto';
-    
+    const targetLang = languageCode || "auto";
+
     // Load documentation for context
     const userGuideDoc = await this.loadUserGuide();
-    
+
     const systemPrompt = `You are a DataVis Web Application assistant with access to the official user guide.
 
 ${userGuideDoc}
+
+**SPECIAL FEATURE - AI CHART GENERATION:**
+When users ask to CREATE/GENERATE a chart (e.g., "tạo biểu đồ", "vẽ chart", "create a chart"), you should:
+1. Check if they mentioned a specific dataset name or ID
+2. Ask them to specify which dataset to use if not mentioned
+3. Guide them to use the chart generation feature
+4. Explain what type of chart would work best for their data
+
+Supported chart types:
+- **Line Chart**: For trends over time, continuous data
+- **Bar Chart**: For comparing categories
+- **Area Chart**: For cumulative trends, filled line charts
+- **Pie Chart**: For showing proportions/percentages
+- **Scatter Plot**: For correlation between two variables
+- **Heatmap**: For patterns in matrix data
+- **Histogram**: For data distribution
+- **Cycle Plot**: For seasonal/periodic patterns
+
+If user wants to create a chart:
+- If NO dataset specified: Ask "Bạn muốn tạo biểu đồ từ dataset nào? Vui lòng chọn dataset trước."
+- If dataset specified: Say "Tôi sẽ giúp bạn tạo biểu đồ! Hãy nhập prompt chi tiết hơn về loại biểu đồ và dữ liệu bạn muốn hiển thị."
 
 RESPONSE FORMAT RULES:
 1. **Use Markdown formatting** for better readability:
@@ -127,32 +166,52 @@ EXAMPLE RESPONSE FORMAT:
 IMPORTANT: Speak naturally about UI elements users can see. DON'T expose technical implementation details. Language: ${targetLang}.`;
 
     const modelMessages = [
-      { role: 'system', content: systemPrompt },
+      { role: "system", content: systemPrompt },
       ...history.slice(-16),
-      { role: 'user', content: message },
+      { role: "user", content: message },
     ];
 
     const res = await fetch(`${this.baseUrl}/chat/completions`, {
-      method: 'POST',
+      method: "POST",
       headers: this.getCommonHeaders(this.apiKey),
-      body: JSON.stringify({ model: this.model, messages: modelMessages, temperature: 0 }),
+      body: JSON.stringify({
+        model: this.model,
+        messages: modelMessages,
+        temperature: 0,
+      }),
     });
 
     if (!res.ok) {
-      const text = await res.text().catch(() => '');
-      this.logger.error(`OpenRouter API error: ${res.status} ${res.statusText} ${text}`);
-      throw new InternalServerErrorException('Failed to get AI response');
+      const text = await res.text().catch(() => "");
+      this.logger.error(
+        `OpenRouter API error: ${res.status} ${res.statusText} ${text}`
+      );
+      throw new InternalServerErrorException("Failed to get AI response");
     }
 
     const data = await res.json();
-    const reply = this.cleanAnswer(data?.choices?.[0]?.message?.content ?? '');
-    if (!reply) throw new InternalServerErrorException('AI returned empty response');
+    const reply = this.cleanAnswer(data?.choices?.[0]?.message?.content ?? "");
+    if (!reply)
+      throw new InternalServerErrorException("AI returned empty response");
 
-    return { reply, processingTime: 'N/A', messageCount: history.length + 1, language: targetLang, success: true };
+    return {
+      reply,
+      processingTime: "N/A",
+      messageCount: history.length + 1,
+      language: targetLang,
+      success: true,
+    };
   }
 
   cleanAnswer(raw: string) {
-    return raw?.trim() || '';
+    return raw?.trim() || "";
+  }
+
+  /** Helper to get user's datasets for context */
+  async getUserDatasets(userId: string) {
+    // This will be injected from controller via PrismaService
+    // Returns basic info: id, name, description
+    return [];
   }
 
   /** ========================= CSV CLEAN ========================= */
@@ -160,14 +219,26 @@ IMPORTANT: Speak naturally about UI elements users can see. DON'T expose technic
     return Math.ceil((text?.length || 0) / 4);
   }
 
+<<<<<<< Updated upstream
   private async sendCleanRequest(csvText: string, payload?: Partial<CleanCsvDto>): Promise<string> {
     const MAX_CHARS = 30_000; // Drastically reduced to avoid output token limits
     const MAX_TOKENS = 10_000; // Reduced input tokens
     const MAX_OUTPUT_TOKENS = 8_000; // Reduced output token limit
+=======
+  private async sendCleanRequest(
+    csvText: string,
+    payload?: Partial<CleanCsvDto>
+  ): Promise<string> {
+    const MAX_CHARS = 250_000;
+    const MAX_TOKENS = 20_000;
+>>>>>>> Stashed changes
     const REQUEST_TIMEOUT = 60000; // 60 seconds
 
-    this.logger.log(`[sendCleanRequest] Starting, CSV length: ${csvText.length}`);
+    this.logger.log(
+      `[sendCleanRequest] Starting, CSV length: ${csvText.length}`
+    );
 
+<<<<<<< Updated upstream
     // Build additional cleaning instructions based on user-selected options
     const additionalInstructions: string[] = [];
     
@@ -222,42 +293,63 @@ IMPORTANT: Speak naturally about UI elements users can see. DON'T expose technic
       'You are a data cleaning assistant. Clean the CSV data and return it in the "data" field as a 2D array. The first inner array is the header row.\n' +
       allInstructions.join('\n');
     const userPrompt = 'Original CSV:\n' + csvText;
+=======
+    const systemPrompt =
+      (payload?.notes ? payload.notes + "\n\n" : "") +
+      'You are a data cleaning assistant. Clean the CSV data and return it in the "data" field as a 2D array. The first inner array is the header row.\n' +
+      "- Trim whitespace from all cells\n" +
+      "- Remove exact duplicate rows (keep first)\n" +
+      "- For numeric columns: remove invalid characters, keep numbers only\n" +
+      "- For date columns: standardize format if possible\n" +
+      "- Use empty string for missing/unparseable values\n" +
+      "- Do NOT invent data";
+    const userPrompt = "Original CSV:\n" + csvText;
+>>>>>>> Stashed changes
 
-    if (csvText.length > MAX_CHARS || this.estimateTokens(systemPrompt + userPrompt) > MAX_TOKENS) {
-      this.logger.error(`[sendCleanRequest] CSV too large: ${csvText.length} chars`);
-      throw new InternalServerErrorException('CSV too large for single-request AI');
+    if (
+      csvText.length > MAX_CHARS ||
+      this.estimateTokens(systemPrompt + userPrompt) > MAX_TOKENS
+    ) {
+      this.logger.error(
+        `[sendCleanRequest] CSV too large: ${csvText.length} chars`
+      );
+      throw new InternalServerErrorException(
+        "CSV too large for single-request AI"
+      );
     }
-    
+
     if (!this.apiKey) {
       this.logger.error(`[sendCleanRequest] No API key configured!`);
-      throw new InternalServerErrorException('OpenRouter API key not configured');
+      throw new InternalServerErrorException(
+        "OpenRouter API key not configured"
+      );
     }
 
     const body = {
       model: this.model,
       messages: [
-        { role: 'system', content: systemPrompt },
-        { role: 'user', content: userPrompt },
+        { role: "system", content: systemPrompt },
+        { role: "user", content: userPrompt },
       ],
       temperature: 0,
       max_tokens: MAX_OUTPUT_TOKENS,
       response_format: {
-        type: 'json_schema',
+        type: "json_schema",
         json_schema: {
-          name: 'cleaned_data',
+          name: "cleaned_data",
           strict: true,
           schema: {
-            type: 'object',
+            type: "object",
             properties: {
               data: {
-                type: 'array',
+                type: "array",
                 items: {
-                  type: 'array',
-                  items: { type: 'string' },
+                  type: "array",
+                  items: { type: "string" },
                 },
               },
             },
-            required: ['data'],
+            required: ["data"],
             additionalProperties: false,
           },
         },
@@ -267,38 +359,52 @@ IMPORTANT: Speak naturally about UI elements users can see. DON'T expose technic
     const maxRetries = 4;
     for (let attempt = 0; attempt <= maxRetries; attempt++) {
       try {
-        this.logger.log(`[sendCleanRequest] Attempt ${attempt + 1}/${maxRetries + 1}, calling ${this.baseUrl}/chat/completions`);
+        this.logger.log(
+          `[sendCleanRequest] Attempt ${attempt + 1}/${maxRetries + 1}, calling ${this.baseUrl}/chat/completions`
+        );
         this.logger.debug(`[sendCleanRequest] Model: ${this.model}, temp: 0`);
-        
+
         // Add timeout wrapper
         const controller = new AbortController();
         const timeoutId = setTimeout(() => controller.abort(), REQUEST_TIMEOUT);
-        
+
         const res = await fetch(`${this.baseUrl}/chat/completions`, {
-          method: 'POST',
+          method: "POST",
           headers: this.getCommonHeaders(this.apiKey),
           body: JSON.stringify(body),
           signal: controller.signal,
         }).finally(() => clearTimeout(timeoutId));
-        
-        this.logger.log(`[sendCleanRequest] Got response: ${res.status} ${res.statusText}`);
-        
-        const text = await res.text().catch(() => '');
-        this.logger.debug(`[sendCleanRequest] Response body length: ${text?.length || 0} chars`);
-        
+
+        this.logger.log(
+          `[sendCleanRequest] Got response: ${res.status} ${res.statusText}`
+        );
+
+        const text = await res.text().catch(() => "");
+        this.logger.debug(
+          `[sendCleanRequest] Response body length: ${text?.length || 0} chars`
+        );
+
         if (!res.ok) {
           this.logger.warn(`[sendCleanRequest] Non-OK response: ${res.status}`);
-          if ([429, 502, 503, 504].includes(res.status) && attempt < maxRetries) {
+          if (
+            [429, 502, 503, 504].includes(res.status) &&
+            attempt < maxRetries
+          ) {
             const backoff = 300 * Math.pow(2, attempt);
-            this.logger.log(`[sendCleanRequest] Retrying after ${backoff}ms...`);
-            await new Promise(r => setTimeout(r, backoff));
+            this.logger.log(
+              `[sendCleanRequest] Retrying after ${backoff}ms...`
+            );
+            await new Promise((r) => setTimeout(r, backoff));
             continue;
           }
-          this.logger.error(`[sendCleanRequest] API error: ${res.status} - ${text}`);
+          this.logger.error(
+            `[sendCleanRequest] API error: ${res.status} - ${text}`
+          );
           throw new Error(`AI error ${res.status}: ${text}`);
         }
         try {
           const data = text ? JSON.parse(text) : null;
+<<<<<<< Updated upstream
           const content = data?.choices?.[0]?.message?.content ?? '';
           const finishReason = data?.choices?.[0]?.finish_reason;
           
@@ -340,6 +446,27 @@ IMPORTANT: Speak naturally about UI elements users can see. DON'T expose technic
         if (err?.name === 'AbortError') {
           this.logger.error(`[sendCleanRequest] Request timed out after ${REQUEST_TIMEOUT}ms`);
           throw err;
+=======
+          const content = data?.choices?.[0]?.message?.content ?? text;
+          this.logger.log(
+            `[sendCleanRequest] Extracted content length: ${content?.length || 0}`
+          );
+          return content;
+        } catch (parseErr) {
+          this.logger.warn(
+            `[sendCleanRequest] Failed to parse JSON, returning raw text`
+          );
+          return text;
+        }
+      } catch (err: any) {
+        this.logger.error(
+          `[sendCleanRequest] Attempt ${attempt + 1} failed: ${err?.message || err}`
+        );
+        if (err?.name === "AbortError") {
+          this.logger.error(
+            `[sendCleanRequest] Request timed out after ${REQUEST_TIMEOUT}ms`
+          );
+>>>>>>> Stashed changes
         }
         
         // Check for 'too large' in message (works for both Error and InternalServerErrorException)
@@ -349,27 +476,34 @@ IMPORTANT: Speak naturally about UI elements users can see. DON'T expose technic
         }
         
         if (attempt === maxRetries) {
-          this.logger.error(`[sendCleanRequest] All retries exhausted, throwing error`);
+          this.logger.error(
+            `[sendCleanRequest] All retries exhausted, throwing error`
+          );
           throw err;
         }
         const backoff = 300 * Math.pow(2, attempt);
         this.logger.log(`[sendCleanRequest] Retrying after ${backoff}ms...`);
-        await new Promise(r => setTimeout(r, backoff));
+        await new Promise((r) => setTimeout(r, backoff));
       }
     }
-    this.logger.warn(`[sendCleanRequest] Exhausted all retries, returning original CSV`);
+    this.logger.warn(
+      `[sendCleanRequest] Exhausted all retries, returning original CSV`
+    );
     return csvText;
   }
 
   async cleanCsv(payload: CleanCsvDto) {
-    const csvText = (payload?.csv ?? '').toString();
-    if (!csvText) throw new BadRequestException('CSV is empty');
-    
+    const csvText = (payload?.csv ?? "").toString();
+    if (!csvText) throw new BadRequestException("CSV is empty");
+
     this.logger.log(`[cleanCsv] Starting, CSV length: ${csvText.length} chars`);
-    this.logger.debug(`[cleanCsv] API key configured: ${this.apiKey ? 'YES' : 'NO'}`);
+    this.logger.debug(
+      `[cleanCsv] API key configured: ${this.apiKey ? "YES" : "NO"}`
+    );
     this.logger.debug(`[cleanCsv] Model: ${this.model}`);
-    
+
     const cleanedCsv = await this.sendCleanRequest(csvText, payload);
+<<<<<<< Updated upstream
     
     this.logger.log(`[cleanCsv] Got response, length: ${cleanedCsv?.length || 0} chars`);
     this.logger.debug(`[cleanCsv] Response starts with: ${cleanedCsv?.substring(0, 100)}`);
@@ -381,6 +515,13 @@ IMPORTANT: Speak naturally about UI elements users can see. DON'T expose technic
       throw new InternalServerErrorException('AI returned empty response');
     }
     
+=======
+
+    this.logger.log(
+      `[cleanCsv] Got response, length: ${cleanedCsv?.length || 0} chars`
+    );
+
+>>>>>>> Stashed changes
     // Parse JSON response with structured output format: {"data": [[...]]}
     let rows: any[][] = [];
     try {
@@ -395,6 +536,7 @@ IMPORTANT: Speak naturally about UI elements users can see. DON'T expose technic
         rows = parsed; // fallback if AI returns array directly
         this.logger.log(`[cleanCsv] Using parsed array directly with ${rows.length} rows`);
       } else {
+<<<<<<< Updated upstream
         this.logger.error(`[cleanCsv] Invalid structure. Type: ${typeof parsed}, Has data: ${!!parsed?.data}, Keys: ${Object.keys(parsed || {}).join(', ')}`);
         throw new Error('Invalid response structure');
       }
@@ -409,11 +551,24 @@ IMPORTANT: Speak naturally about UI elements users can see. DON'T expose technic
       }
       
       throw new InternalServerErrorException('AI returned invalid JSON format');
+=======
+        throw new Error("Invalid response structure");
+      }
+    } catch (err) {
+      this.logger.error(
+        `[cleanCsv] Failed to parse JSON response: ${err.message}`
+      );
+      throw new InternalServerErrorException("AI returned invalid JSON format");
+>>>>>>> Stashed changes
     }
-    
+
     this.logger.log(`[cleanCsv] Parsed ${rows.length} rows`);
-    
-    return { data: rows, rowCount: rows.length, columnCount: rows[0]?.length || 0 };
+
+    return {
+      data: rows,
+      rowCount: rows.length,
+      columnCount: rows[0]?.length || 0,
+    };
   }
 
   /** ========================= LARGE CSV TEXT CLEAN (with progress) ========================= */
@@ -570,33 +725,50 @@ IMPORTANT: Speak naturally about UI elements users can see. DON'T expose technic
       fs.promises.unlink(file.path).catch(() => undefined);
       return buf;
     }
-    throw new BadRequestException('Unsupported file input');
+    throw new BadRequestException("Unsupported file input");
   }
 
   private extractRowsFromFile(buffer: Buffer, filename: string): any[][] {
-    const lower = (filename || '').toLowerCase();
-    if (lower.endsWith('.csv')) return this.csvToRows(buffer.toString('utf8'));
-    const wb = XLSX.read(buffer, { type: 'buffer' });
+    const lower = (filename || "").toLowerCase();
+    if (lower.endsWith(".csv")) return this.csvToRows(buffer.toString("utf8"));
+    const wb = XLSX.read(buffer, { type: "buffer" });
     const ws = wb.Sheets[wb.SheetNames[0]];
-    const rows: any[][] = XLSX.utils.sheet_to_json(ws, { header: 1, blankrows: false, defval: '' });
-    return rows.filter(r => (r || []).some(cell => String(cell ?? '').trim() !== ''));
+    const rows: any[][] = XLSX.utils.sheet_to_json(ws, {
+      header: 1,
+      blankrows: false,
+      defval: "",
+    });
+    return rows.filter((r) =>
+      (r || []).some((cell) => String(cell ?? "").trim() !== "")
+    );
   }
 
   private csvToRows(csv: string): any[][] {
-    return csv.replace(/\r\n/g, '\n').split('\n').filter(l => l.trim() !== '').map(this.parseCsvLine);
+    return csv
+      .replace(/\r\n/g, "\n")
+      .split("\n")
+      .filter((l) => l.trim() !== "")
+      .map(this.parseCsvLine);
   }
 
   private parseCsvLine(line: string): string[] {
     const result: string[] = [];
-    let current = '', inQuotes = false;
+    let current = "",
+      inQuotes = false;
     for (let i = 0; i < line.length; i++) {
       const ch = line[i];
       if (inQuotes) {
-        if (ch === '"') { if (line[i + 1] === '"') { current += '"'; i++; } else inQuotes = false; }
-        else current += ch;
+        if (ch === '"') {
+          if (line[i + 1] === '"') {
+            current += '"';
+            i++;
+          } else inQuotes = false;
+        } else current += ch;
       } else {
-        if (ch === ',') { result.push(current); current = ''; }
-        else if (ch === '"') inQuotes = true;
+        if (ch === ",") {
+          result.push(current);
+          current = "";
+        } else if (ch === '"') inQuotes = true;
         else current += ch;
       }
     }
@@ -606,43 +778,61 @@ IMPORTANT: Speak naturally about UI elements users can see. DON'T expose technic
 
   private async rowsToCsv(rows: any[][]): Promise<string> {
     const escapeCell = (v: any) => {
-      const s = String(v ?? '').trim();
+      const s = String(v ?? "").trim();
       return /[",\r\n]/.test(s) ? `"${s.replace(/"/g, '""')}"` : s;
     };
-    return rows.map(r => r.map(escapeCell).join(',')).join('\n');
+    return rows.map((r) => r.map(escapeCell).join(",")).join("\n");
   }
 
   /** ========================= LARGE CSV CLEAN ========================= */
- async cleanLargeCsvToMatrix(input: { file: any; options?: { rowsPerChunk?: number; concurrency?: number; notes?: string; onProgress?: (completed: number, total: number) => void } }) {
-  const { file, options } = input;
-  if (!file) throw new BadRequestException('File is required');
-  const buffer = await this.resolveFileBuffer(file);
-  const rows = this.extractRowsFromFile(buffer, file.originalname || file.filename || 'upload');
-  if (!rows.length) throw new BadRequestException('No rows found');
+  async cleanLargeCsvToMatrix(input: {
+    file: any;
+    options?: {
+      rowsPerChunk?: number;
+      concurrency?: number;
+      notes?: string;
+      onProgress?: (completed: number, total: number) => void;
+    };
+  }) {
+    const { file, options } = input;
+    if (!file) throw new BadRequestException("File is required");
+    const buffer = await this.resolveFileBuffer(file);
+    const rows = this.extractRowsFromFile(
+      buffer,
+      file.originalname || file.filename || "upload"
+    );
+    if (!rows.length) throw new BadRequestException("No rows found");
 
+<<<<<<< Updated upstream
   const header = rows[0];
   const defaultRowsPerChunk = options?.rowsPerChunk ?? 200; // Reduced to 200 rows per chunk
   const chunks: any[][][] = [];
+=======
+    const header = rows[0];
+    const defaultRowsPerChunk = options?.rowsPerChunk ?? 500; // giảm chunk nhỏ hơn
+    const chunks: any[][][] = [];
+>>>>>>> Stashed changes
 
-  // Chia thành các chunks nhỏ
-  for (let i = 1; i < rows.length; i += defaultRowsPerChunk) {
-    chunks.push(rows.slice(i, i + defaultRowsPerChunk));
-  }
+    // Chia thành các chunks nhỏ
+    for (let i = 1; i < rows.length; i += defaultRowsPerChunk) {
+      chunks.push(rows.slice(i, i + defaultRowsPerChunk));
+    }
 
-  const results: any[][][] = [];
-  const concurrency = Math.min(options?.concurrency ?? 3, chunks.length);
-  const inflight: Promise<void>[] = [];
-  let completedCount = 0;
+    const results: any[][][] = [];
+    const concurrency = Math.min(options?.concurrency ?? 3, chunks.length);
+    const inflight: Promise<void>[] = [];
+    let completedCount = 0;
 
-  // Emit initial progress
-  if (options?.onProgress) {
-    options.onProgress(0, chunks.length);
-  }
+    // Emit initial progress
+    if (options?.onProgress) {
+      options.onProgress(0, chunks.length);
+    }
 
-  const schedule = (chunk: any[][], idx: number) => {
-    const task = (async () => {
-      const subResults: any[][] = [];
+    const schedule = (chunk: any[][], idx: number) => {
+      const task = (async () => {
+        const subResults: any[][] = [];
 
+<<<<<<< Updated upstream
       // Chia subchunk theo ký tự CSV để không vượt CLEAN_MAX_CHARS
       const makeSubchunks = async (rows: any[][]) => {
         const out: any[][][] = [];
@@ -659,15 +849,51 @@ IMPORTANT: Speak naturally about UI elements users can see. DON'T expose technic
             } else {
               out.push(current.slice());
               current = [r];
+=======
+        // Chia subchunk theo ký tự CSV để không vượt CLEAN_MAX_CHARS
+        const makeSubchunks = async (rows: any[][]) => {
+          const out: any[][][] = [];
+          let current: any[][] = [];
+          for (const r of rows) {
+            current.push(r);
+            const csv = await this.rowsToCsv([header, ...current]);
+            if (csv.length >= this.CLEAN_MAX_CHARS) {
+              current.pop();
+              if (current.length === 0) {
+                out.push([r]);
+                current = [];
+              } else {
+                out.push(current.slice());
+                current = [r];
+              }
+>>>>>>> Stashed changes
             }
           }
+          if (current.length) out.push(current.slice());
+          return out;
+        };
+
+        const subchunks = await makeSubchunks(chunk);
+
+        for (let subIndex = 0; subIndex < subchunks.length; subIndex++) {
+          const sub = subchunks[subIndex];
+          const csv = await this.rowsToCsv([header, ...sub]);
+          const cleaned = await this.cleanCsv({
+            csv,
+            notes: options?.notes,
+          } as any);
+          if (Array.isArray(cleaned?.data) && cleaned.data.length) {
+            subResults.push(...cleaned.data.slice(1)); // bỏ header
+          } else {
+            this.logger.warn(
+              `Chunk ${idx} sub ${subIndex}: AI returned no cleaned rows`
+            );
+          }
         }
-        if (current.length) out.push(current.slice());
-        return out;
-      };
 
-      const subchunks = await makeSubchunks(chunk);
+        results[idx] = [header, ...subResults];
 
+<<<<<<< Updated upstream
       for (let subIndex = 0; subIndex < subchunks.length; subIndex++) {
         const sub = subchunks[subIndex];
         const csv = await this.rowsToCsv([header, ...sub]);
@@ -717,100 +943,357 @@ IMPORTANT: Speak naturally about UI elements users can see. DON'T expose technic
               this.logger.error(`Cannot split further - single row too large`);
             }
           }
+=======
+        // Report progress
+        completedCount++;
+        if (options?.onProgress) {
+          options.onProgress(completedCount, chunks.length);
+>>>>>>> Stashed changes
         }
-      }
+      })();
 
-      results[idx] = [header, ...subResults];
-      
-      // Report progress
-      completedCount++;
-      if (options?.onProgress) {
-        options.onProgress(completedCount, chunks.length);
-      }
-    })();
+      inflight.push(task);
+      task.finally(() => {
+        const i = inflight.indexOf(task);
+        if (i >= 0) inflight.splice(i, 1);
+      });
+      return task;
+    };
 
-    inflight.push(task);
-    task.finally(() => {
-      const i = inflight.indexOf(task);
-      if (i >= 0) inflight.splice(i, 1);
+    chunks.forEach((chunk, idx) => schedule(chunk, idx));
+    await Promise.all(inflight);
+
+    // Merge & deduplicate
+    const merged: any[][] = [header];
+    const seen = new Set<string>();
+    results.forEach((chunkRows) => {
+      chunkRows.slice(1).forEach((row) => {
+        const key = JSON.stringify(row);
+        if (!seen.has(key)) {
+          seen.add(key);
+          merged.push(row);
+        }
+      });
     });
-    return task;
-  };
 
-  chunks.forEach((chunk, idx) => schedule(chunk, idx));
-  await Promise.all(inflight);
-
-  // Merge & deduplicate
-  const merged: any[][] = [header];
-  const seen = new Set<string>();
-  results.forEach(chunkRows => {
-    chunkRows.slice(1).forEach(row => {
-      const key = JSON.stringify(row);
-      if (!seen.has(key)) { seen.add(key); merged.push(row); }
-    });
-  });
-
-  return merged;
-}
+    return merged;
+  }
 
   /** ========================= EXCEL CLEAN ========================= */
-  async cleanExcelToMatrix(input: { file: any; options?: { notes?: string; onProgress?: (completed: number, total: number) => void } }) {
+  async cleanExcelToMatrix(input: {
+    file: any;
+    options?: {
+      notes?: string;
+      onProgress?: (completed: number, total: number) => void;
+    };
+  }) {
     const { file, options } = input;
-    if (!file) throw new BadRequestException('File is required');
-    const filename = (file?.originalname || file?.filename || '').toLowerCase();
-    
+    if (!file) throw new BadRequestException("File is required");
+    const filename = (file?.originalname || file?.filename || "").toLowerCase();
+
     this.logger.log(`[cleanExcelToMatrix] Processing file: ${filename}`);
-    
+
     // CSV files always use chunked cleaning
-    if (filename.endsWith('.csv')) {
-      this.logger.log(`[cleanExcelToMatrix] Detected CSV file, using cleanLargeCsvToMatrix`);
+    if (filename.endsWith(".csv")) {
+      this.logger.log(
+        `[cleanExcelToMatrix] Detected CSV file, using cleanLargeCsvToMatrix`
+      );
       return this.cleanLargeCsvToMatrix({ file, options });
     }
-    
+
     // For Excel files, extract rows first
     this.logger.log(`[cleanExcelToMatrix] Resolving file buffer...`);
     const buffer = await this.resolveFileBuffer(file);
     this.logger.log(`[cleanExcelToMatrix] Extracting rows from Excel...`);
     const rows = this.extractRowsFromFile(buffer, filename);
-    if (!rows.length) throw new BadRequestException('Uploaded file has no data');
+    if (!rows.length)
+      throw new BadRequestException("Uploaded file has no data");
 
-    this.logger.log(`[cleanExcelToMatrix] Excel file has ${rows.length} rows (including header)`);
+    this.logger.log(
+      `[cleanExcelToMatrix] Excel file has ${rows.length} rows (including header)`
+    );
 
     // If Excel file is large (>100 rows), use chunked cleaning for progress tracking
     if (rows.length > 100) {
-      this.logger.log(`[cleanExcelToMatrix] Using chunked cleaning for large Excel file (${rows.length} rows)`);
+      this.logger.log(
+        `[cleanExcelToMatrix] Using chunked cleaning for large Excel file (${rows.length} rows)`
+      );
       // Convert to in-memory "file-like" object that cleanLargeCsvToMatrix can process
       const csvText = await this.rowsToCsv(rows);
-      const csvBuffer = Buffer.from(csvText, 'utf8');
+      const csvBuffer = Buffer.from(csvText, "utf8");
       const tempFile = {
         buffer: csvBuffer,
-        originalname: filename.replace(/\.xlsx?$/i, '.csv'),
-        filename: filename.replace(/\.xlsx?$/i, '.csv'),
+        originalname: filename.replace(/\.xlsx?$/i, ".csv"),
+        filename: filename.replace(/\.xlsx?$/i, ".csv"),
       };
       return this.cleanLargeCsvToMatrix({ file: tempFile, options });
     }
 
     // Small Excel files: clean directly (still report progress as 1/1 chunk)
-    this.logger.log(`[cleanExcelToMatrix] Small file (${rows.length} rows), cleaning directly...`);
-    
+    this.logger.log(
+      `[cleanExcelToMatrix] Small file (${rows.length} rows), cleaning directly...`
+    );
+
     if (options?.onProgress) {
       this.logger.debug(`[cleanExcelToMatrix] Reporting initial progress: 0/1`);
       options.onProgress(0, 1);
     }
-    
+
     this.logger.log(`[cleanExcelToMatrix] Converting rows to CSV...`);
     const csv = await this.rowsToCsv(rows);
-    this.logger.log(`[cleanExcelToMatrix] CSV length: ${csv.length} chars, calling cleanCsv...`);
-    
+    this.logger.log(
+      `[cleanExcelToMatrix] CSV length: ${csv.length} chars, calling cleanCsv...`
+    );
+
     const cleaned = await this.cleanCsv({ csv, notes: options?.notes } as any);
-    
-    this.logger.log(`[cleanExcelToMatrix] Cleaning completed, rows: ${cleaned.rowCount}`);
-    
+
+    this.logger.log(
+      `[cleanExcelToMatrix] Cleaning completed, rows: ${cleaned.rowCount}`
+    );
+
     if (options?.onProgress) {
       this.logger.debug(`[cleanExcelToMatrix] Reporting final progress: 1/1`);
       options.onProgress(1, 1);
     }
-    
-    return { data: cleaned.data, rowCount: cleaned.rowCount, columnCount: cleaned.columnCount };
+
+    return {
+      data: cleaned.data,
+      rowCount: cleaned.rowCount,
+      columnCount: cleaned.columnCount,
+    };
+  }
+
+  /** ========================= GENERATE CHART CONFIG ========================= */
+  async generateChartConfig(input: {
+    prompt: string;
+    datasetId: string;
+    headers: Array<{ id: string; name: string; type: string }>;
+  }) {
+    const { prompt, headers } = input;
+
+    if (!this.apiKey) {
+      throw new InternalServerErrorException("AI service is not configured");
+    }
+
+    if (!headers || headers.length === 0) {
+      throw new BadRequestException("Dataset headers are required");
+    }
+
+    this.logger.log(
+      `[generateChartConfig] Generating config for prompt: "${prompt}"`
+    );
+    this.logger.log(
+      `[generateChartConfig] Available headers: ${JSON.stringify(headers)}`
+    );
+
+    // Build system prompt with chart configuration knowledge
+    const systemPrompt = `You are an expert data visualization assistant specializing in creating chart configurations.
+
+**Available Dataset Headers:**
+${headers.map((h, idx) => `${idx + 1}. "${h.name}" (id: ${h.id}, type: ${h.type})`).join("\n")}
+
+**Supported Chart Types (ONLY USE THESE):**
+- line: Line charts for trends over time or continuous data (supports: basic, smooth, stepped, dashed)
+- bar: Bar/Column charts for categorical comparisons (supports: grouped, stacked, percentage)
+- area: Area charts for cumulative trends (supports: basic, stacked, percentage, stream)
+- pie: Pie charts for part-to-whole relationships (supports: basic, exploded, nested)
+- scatter: Scatter plots for correlation between two variables (supports: basic, regression, clustered)
+- heatmap: Heatmaps for patterns in matrix data (supports: grid, calendar)
+- histogram: Histograms for data distribution analysis
+- cycleplot: Cycle plots for periodic/seasonal patterns over time
+
+**Your Task:**
+Analyze the user's prompt and generate a complete chart configuration object that:
+1. Selects the MOST appropriate chart type from the supported list above
+2. Maps data headers to chart axes using their IDs (NEVER use names)
+3. Sets appropriate visual options (colors, labels, theme, etc.)
+4. Includes helpful default settings
+
+**Chart Selection Guidelines:**
+- Time series / trends → line or area
+- Categorical comparison → bar
+- Part-to-whole / composition → pie
+- Correlation between 2 variables → scatter
+- Distribution of single variable → histogram
+- Patterns in matrix → heatmap
+- Seasonal/cyclical patterns → cycleplot
+
+**Important Rules:**
+- ONLY use chart types from the supported list (line, bar, area, pie, scatter, heatmap, histogram, cycleplot)
+- Always use header IDs for xAxisKey and yAxisKeys, NOT header names
+- For line/area/bar: xAxis should be categorical or time, yAxis should be numeric
+- For pie: only need one yAxisKey (the value to show)
+- For scatter: both xAxis and yAxis should be numeric
+- For histogram: only need one xAxisKey (the variable to analyze)
+- Choose sensible defaults: width (800), height (400), margins (top:20, left:50, right:30, bottom:40)
+- Set theme based on keywords like "dark", "light" in the prompt (default: "light")
+- Enable features mentioned in the prompt (legend, grid, tooltips, etc.)
+- Always set showLegend: true, showGrid: true, showTooltip: true as defaults
+
+**Response Format:**
+Return a JSON object with:
+- type: The selected chart type (string)
+- config: Complete chart configuration matching the ChartConfigDto structure
+- explanation: Brief explanation of your choices (2-3 sentences in Vietnamese if prompt is Vietnamese)
+- suggestedName: A descriptive name for this chart (in Vietnamese if prompt is Vietnamese)`;
+
+    const userPrompt = `User request: "${prompt}"
+
+Generate a chart configuration that best matches this request.`;
+
+    try {
+      const res = await fetch(`${this.baseUrl}/chat/completions`, {
+        method: "POST",
+        headers: this.getCommonHeaders(this.apiKey),
+        body: JSON.stringify({
+          model: this.model,
+          messages: [
+            { role: "system", content: systemPrompt },
+            { role: "user", content: userPrompt },
+          ],
+          temperature: 0.3,
+          response_format: {
+            type: "json_schema",
+            json_schema: {
+              name: "chart_config_response",
+              strict: true,
+              schema: {
+                type: "object",
+                properties: {
+                  type: {
+                    type: "string",
+                    enum: [
+                      "line",
+                      "bar",
+                      "area",
+                      "pie",
+                      "scatter",
+                      "heatmap",
+                      "histogram",
+                      "cycleplot",
+                    ],
+                  },
+                  config: {
+                    type: "object",
+                    properties: {
+                      title: { type: "string" },
+                      width: { type: "number" },
+                      height: { type: "number" },
+                      margin: {
+                        type: "object",
+                        properties: {
+                          top: { type: "number" },
+                          left: { type: "number" },
+                          right: { type: "number" },
+                          bottom: { type: "number" },
+                        },
+                        required: ["top", "left", "right", "bottom"],
+                        additionalProperties: false,
+                      },
+                      theme: { type: "string", enum: ["light", "dark"] },
+                      xAxisKey: { type: "string" },
+                      yAxisKeys: {
+                        type: "array",
+                        items: { type: "string" },
+                      },
+                      xAxisLabel: { type: "string" },
+                      yAxisLabel: { type: "string" },
+                      showLegend: { type: "boolean" },
+                      showGrid: { type: "boolean" },
+                      showTooltip: { type: "boolean" },
+                      showValues: { type: "boolean" },
+                      animationDuration: { type: "number" },
+                      lineType: {
+                        type: "string",
+                        enum: ["basic", "smooth", "stepped", "dashed"],
+                      },
+                      barType: {
+                        type: "string",
+                        enum: ["grouped", "stacked", "percentage"],
+                      },
+                      areaType: {
+                        type: "string",
+                        enum: ["basic", "stacked", "percentage", "stream"],
+                      },
+                      pieType: {
+                        type: "string",
+                        enum: ["basic", "exploded", "nested"],
+                      },
+                      donutType: {
+                        type: "string",
+                        enum: ["basic", "multi-level", "progress"],
+                      },
+                    },
+                    required: [
+                      "title",
+                      "width",
+                      "height",
+                      "margin",
+                      "xAxisKey",
+                      "yAxisKeys",
+                    ],
+                    additionalProperties: true,
+                  },
+                  explanation: { type: "string" },
+                  suggestedName: { type: "string" },
+                },
+                required: ["type", "config", "explanation", "suggestedName"],
+                additionalProperties: false,
+              },
+            },
+          },
+        }),
+      });
+
+      if (!res.ok) {
+        const text = await res.text().catch(() => "");
+        this.logger.error(
+          `OpenRouter API error: ${res.status} ${res.statusText} ${text}`
+        );
+        throw new InternalServerErrorException(
+          "Failed to generate chart config from AI"
+        );
+      }
+
+      const data = await res.json();
+      const content = data?.choices?.[0]?.message?.content;
+
+      if (!content) {
+        throw new InternalServerErrorException("AI returned empty response");
+      }
+
+      const parsed = JSON.parse(content);
+
+      this.logger.log(`[generateChartConfig] Generated config successfully`);
+      this.logger.debug(
+        `[generateChartConfig] Config: ${JSON.stringify(parsed.config)}`
+      );
+
+      // Generate chart URL with config
+      const configBase64 = Buffer.from(
+        JSON.stringify({
+          type: parsed.type,
+          config: parsed.config,
+          name: parsed.suggestedName,
+          datasetId: input.datasetId,
+        })
+      ).toString("base64url");
+
+      const chartUrl = `/workspace/charts/editor?config=${configBase64}`;
+
+      return {
+        type: parsed.type,
+        config: parsed.config,
+        explanation: parsed.explanation,
+        suggestedName: parsed.suggestedName,
+        chartUrl: chartUrl,
+        success: true,
+      };
+    } catch (error) {
+      this.logger.error(`[generateChartConfig] Error: ${error.message}`);
+      throw new InternalServerErrorException(
+        `Failed to generate chart config: ${error.message}`
+      );
+    }
   }
 }

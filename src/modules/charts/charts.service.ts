@@ -16,7 +16,7 @@ import { parseChartSpecificConfig } from "./helpers/chart-config.helper";
 import { Messages } from "src/constant/message-config";
 import { ChartHistoryService } from "@modules/chart-history/chart-history.service";
 import { SubscriptionPlansService } from "../subscription-plans/subscription-plans.service";
-import * as moment from 'moment-timezone';
+import * as moment from "moment-timezone";
 
 @Injectable()
 export class ChartsService {
@@ -25,8 +25,8 @@ export class ChartsService {
     private readonly datasetService: DatasetsService,
     private readonly subscriptionPlansService: SubscriptionPlansService,
     @Inject(forwardRef(() => ChartHistoryService))
-    private readonly chartHistoryService: ChartHistoryService,
-  ) { }
+    private readonly chartHistoryService: ChartHistoryService
+  ) {}
 
   async findAll(userId: string) {
     try {
@@ -115,8 +115,8 @@ export class ChartsService {
         throw new ForbiddenException("You do not have access to this chart");
       }
 
-      // Enhance chart response with resolved axis names
-      const enhancedChart = this.enhanceChartWithAxisNames(chart);
+      // Return IDs in config; attach axis names separately
+      const enhancedChart = this.enhanceChartWithAxisIds(chart);
 
       return enhancedChart;
     } catch (error) {
@@ -131,7 +131,8 @@ export class ChartsService {
   }
 
   async create(createChartDto: CreateChartDto, userId: string) {
-    const { name, description, type, config, datasetId, imageUrl } = createChartDto;
+    const { name, description, type, config, datasetId, imageUrl } =
+      createChartDto;
     console.log("Creating chart with config:", config);
     // Database operation with error handling
     try {
@@ -199,11 +200,11 @@ export class ChartsService {
       await this.chartHistoryService.createHistorySnapshot(
         id,
         userId,
-        `Restore before update: ${moment(createdAt).format('HH:mm:ss - DD.MM.YYYY')}`,
-        currentChart?.imageUrl || undefined, // Lưu ảnh CŨ vào history
+        `Restore before update: ${moment(createdAt).format("HH:mm:ss - DD.MM.YYYY")}`,
+        currentChart?.imageUrl || undefined // Lưu ảnh CŨ vào history
       );
 
-      console.log('Updating chart with config:', updateData.config);
+      console.log("Updating chart with config:", updateData.config);
       // Frontend sends complete config, no need for backend defaults
       // Lưu ảnh MỚI vào bảng Chart
       const updatedChart = await this.prismaService.prisma.chart.update({
@@ -238,7 +239,7 @@ export class ChartsService {
       ) {
         throw error;
       }
-      console.log('Console.log Hello world: ', error);
+      console.log("Console.log Hello world: ", error);
       throw new BadRequestException(`Failed to update chart: ${error.message}`);
     }
   }
@@ -324,6 +325,41 @@ export class ChartsService {
     } catch (error) {
       // If enhancement fails, return original chart
       console.warn("Failed to enhance chart with axis names:", error.message);
+      return chart;
+    }
+  }
+
+  // Helper method to keep IDs in config and attach axis names as metadata
+  private enhanceChartWithAxisIds(chart: any) {
+    try {
+      if (!chart.config || !chart.dataset?.headers) {
+        return chart;
+      }
+
+      const config = chart.config;
+      const headers = chart.dataset.headers;
+
+      const idToName = new Map<string, string>();
+      headers.forEach((h) => idToName.set(h.id, h.name));
+
+      return {
+        ...chart,
+        // Keep config as-is (IDs preserved)
+        config: config,
+        axisNames: {
+          xAxisName:
+            config?.config?.xAxisKey && idToName.has(config.config.xAxisKey)
+              ? idToName.get(config.config.xAxisKey)
+              : null,
+          yAxisNames: Array.isArray(config?.config?.yAxisKeys)
+            ? config.config.yAxisKeys.map((k: string) =>
+                idToName.has(k) ? idToName.get(k) : null
+              )
+            : [],
+        },
+      };
+    } catch (error) {
+      console.warn("Failed to enhance chart with axis IDs:", error.message);
       return chart;
     }
   }
