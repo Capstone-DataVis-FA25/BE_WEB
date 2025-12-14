@@ -6,6 +6,7 @@ import * as path from 'path';
 import { CleanCsvDto } from './dto/clean-csv.dto';
 import { parse } from 'fast-csv';
 import { Readable } from 'stream';
+import { PythonShell } from 'python-shell';
 
 @Injectable()
 export class AiService {
@@ -53,14 +54,14 @@ export class AiService {
         const parsed = JSON.parse(messagesJson);
         if (Array.isArray(parsed))
           history = parsed.filter(m => m && (m.role === 'user' || m.role === 'assistant') && typeof m.content === 'string');
-      } catch {}
+      } catch { }
     }
 
     const targetLang = languageCode || 'auto';
-    
+
     // Load documentation for context
     const userGuideDoc = await this.loadUserGuide();
-    
+
     const systemPrompt = `You are a DataVis Web Application assistant with access to the official user guide.
 
 ${userGuideDoc}
@@ -170,19 +171,19 @@ IMPORTANT: Speak naturally about UI elements users can see. DON'T expose technic
 
     // Build additional cleaning instructions based on user-selected options
     const additionalInstructions: string[] = [];
-    
+
     if (payload?.removeOutliers === true) {
       additionalInstructions.push('- Remove or cap outliers: detect numeric outliers using IQR method and cap them to reasonable bounds');
     }
-    
+
     if (payload?.validateDomain === true) {
       additionalInstructions.push('- Validate domain constraints: check if values make sense (e.g., age 0-120, valid email format)');
     }
-    
+
     if (payload?.standardizeUnits === true) {
       additionalInstructions.push('- Standardize units: convert all measurements to consistent units (e.g., km to m, lbs to kg)');
     }
-    
+
     // Base cleaning instructions (always applied)
     const baseInstructions = [
       '- Trim whitespace from all cells',
@@ -199,7 +200,7 @@ IMPORTANT: Speak naturally about UI elements users can see. DON'T expose technic
       '  * Remove outliers that are clearly errors (e.g., weight=6000kg, height=1.70m, age=150)',
       '- For missing/empty values - IMPORTANT RULES:',
       '  * First check: if row has ID column and ID is missing → REMOVE the entire row',
-      '  * Second check: if row has name column and name is missing → REMOVE the entire row', 
+      '  * Second check: if row has name column and name is missing → REMOVE the entire row',
       '  * Third check: count missing fields in the row:',
       '    - If >30% fields missing → REMOVE the entire row',
       '    - If ≤30% fields missing → KEEP row and fill ALL missing values using these rules:',
@@ -214,10 +215,10 @@ IMPORTANT: Speak naturally about UI elements users can see. DON'T expose technic
       '- For date columns: standardize to YYYY-MM-DD format',
       '- Do NOT invent data, do NOT add new rows, do NOT skip columns'
     ];
-    
+
     // Combine base instructions with additional user-selected options
     const allInstructions = [...baseInstructions, ...additionalInstructions];
-    
+
     const systemPrompt = (payload?.notes ? payload.notes + '\n\n' : '') +
       'You are a data cleaning assistant. Clean the CSV data and return it in the "data" field as a 2D array. The first inner array is the header row.\n' +
       allInstructions.join('\n');
@@ -227,7 +228,7 @@ IMPORTANT: Speak naturally about UI elements users can see. DON'T expose technic
       this.logger.error(`[sendCleanRequest] CSV too large: ${csvText.length} chars`);
       throw new InternalServerErrorException('CSV too large for single-request AI');
     }
-    
+
     if (!this.apiKey) {
       this.logger.error(`[sendCleanRequest] No API key configured!`);
       throw new InternalServerErrorException('OpenRouter API key not configured');
@@ -269,23 +270,23 @@ IMPORTANT: Speak naturally about UI elements users can see. DON'T expose technic
       try {
         this.logger.log(`[sendCleanRequest] Attempt ${attempt + 1}/${maxRetries + 1}, calling ${this.baseUrl}/chat/completions`);
         this.logger.debug(`[sendCleanRequest] Model: ${this.model}, temp: 0`);
-        
+
         // Add timeout wrapper
         const controller = new AbortController();
         const timeoutId = setTimeout(() => controller.abort(), REQUEST_TIMEOUT);
-        
+
         const res = await fetch(`${this.baseUrl}/chat/completions`, {
           method: 'POST',
           headers: this.getCommonHeaders(this.apiKey),
           body: JSON.stringify(body),
           signal: controller.signal,
         }).finally(() => clearTimeout(timeoutId));
-        
+
         this.logger.log(`[sendCleanRequest] Got response: ${res.status} ${res.statusText}`);
-        
+
         const text = await res.text().catch(() => '');
         this.logger.debug(`[sendCleanRequest] Response body length: ${text?.length || 0} chars`);
-        
+
         if (!res.ok) {
           this.logger.warn(`[sendCleanRequest] Non-OK response: ${res.status}`);
           if ([429, 502, 503, 504].includes(res.status) && attempt < maxRetries) {
@@ -301,32 +302,32 @@ IMPORTANT: Speak naturally about UI elements users can see. DON'T expose technic
           const data = text ? JSON.parse(text) : null;
           const content = data?.choices?.[0]?.message?.content ?? '';
           const finishReason = data?.choices?.[0]?.finish_reason;
-          
+
           // Log more details for debugging
           this.logger.log(`[sendCleanRequest] API response structure detected: ${data?.choices ? 'YES' : 'NO'}`);
           this.logger.log(`[sendCleanRequest] Content extracted: ${content ? 'YES' : 'NO'}, length: ${content?.length || 0}`);
           this.logger.log(`[sendCleanRequest] Finish reason: ${finishReason}`);
-          
+
           // If no content extracted, log what we got
           if (!content) {
             this.logger.error(`[sendCleanRequest] No content in response! Full response preview: ${text?.substring(0, 500)}`);
             throw new Error('No content in API response');
           }
-          
+
           // Check if response was truncated
           if (finishReason === 'length') {
             this.logger.warn(`[sendCleanRequest] Response truncated by token limit`);
             // Don't retry on truncation - the data is too large
             throw new InternalServerErrorException('Data chunk too large for AI processing. This will be handled by automatic chunking.');
           }
-          
+
           // Validate JSON is complete (has closing braces)
           const trimmedContent = (content || '').trim();
           if (trimmedContent && !trimmedContent.endsWith('}') && !trimmedContent.endsWith(']')) {
             this.logger.error(`[sendCleanRequest] Response appears truncated: last 50 chars = ${trimmedContent.slice(-50)}`);
             throw new InternalServerErrorException('AI returned incomplete JSON');
           }
-          
+
           return content;
         } catch (parseErr) {
           this.logger.error(`[sendCleanRequest] Failed to parse API response: ${parseErr.message}`);
@@ -335,19 +336,19 @@ IMPORTANT: Speak naturally about UI elements users can see. DON'T expose technic
         }
       } catch (err: any) {
         this.logger.error(`[sendCleanRequest] Attempt ${attempt + 1} failed: ${err?.message || err}`);
-        
+
         // Don't retry on truncation or timeout - these won't be fixed by retrying
         if (err?.name === 'AbortError') {
           this.logger.error(`[sendCleanRequest] Request timed out after ${REQUEST_TIMEOUT}ms`);
           throw err;
         }
-        
+
         // Check for 'too large' in message (works for both Error and InternalServerErrorException)
         if (err?.message?.includes('too large')) {
           this.logger.error(`[sendCleanRequest] Data too large, won't retry`);
           throw err;
         }
-        
+
         if (attempt === maxRetries) {
           this.logger.error(`[sendCleanRequest] All retries exhausted, throwing error`);
           throw err;
@@ -364,30 +365,30 @@ IMPORTANT: Speak naturally about UI elements users can see. DON'T expose technic
   async cleanCsv(payload: CleanCsvDto) {
     const csvText = (payload?.csv ?? '').toString();
     if (!csvText) throw new BadRequestException('CSV is empty');
-    
+
     this.logger.log(`[cleanCsv] Starting, CSV length: ${csvText.length} chars`);
     this.logger.debug(`[cleanCsv] API key configured: ${this.apiKey ? 'YES' : 'NO'}`);
     this.logger.debug(`[cleanCsv] Model: ${this.model}`);
-    
+
     const cleanedCsv = await this.sendCleanRequest(csvText, payload);
-    
+
     this.logger.log(`[cleanCsv] Got response, length: ${cleanedCsv?.length || 0} chars`);
     this.logger.debug(`[cleanCsv] Response starts with: ${cleanedCsv?.substring(0, 100)}`);
     this.logger.debug(`[cleanCsv] Response ends with: ${cleanedCsv?.substring(Math.max(0, cleanedCsv.length - 100))}`);
-    
+
     // Validate response isn't empty or too small
     if (!cleanedCsv || cleanedCsv.trim().length < 10) {
       this.logger.error(`[cleanCsv] Response too short or empty`);
       throw new InternalServerErrorException('AI returned empty response');
     }
-    
+
     // Parse JSON response with structured output format: {"data": [[...]]}
     let rows: any[][] = [];
     try {
       this.logger.debug(`[cleanCsv] Attempting to parse JSON...`);
       const parsed = JSON.parse(cleanedCsv);
       this.logger.debug(`[cleanCsv] JSON parsed successfully, checking structure...`);
-      
+
       if (parsed && Array.isArray(parsed.data)) {
         rows = parsed.data;
         this.logger.log(`[cleanCsv] Found data array with ${rows.length} rows`);
@@ -402,17 +403,17 @@ IMPORTANT: Speak naturally about UI elements users can see. DON'T expose technic
       this.logger.error(`[cleanCsv] Failed to parse JSON response: ${err.message}`);
       this.logger.error(`[cleanCsv] Response preview (first 500 chars): ${cleanedCsv?.substring(0, 500)}`);
       this.logger.error(`[cleanCsv] Response preview (last 500 chars): ${cleanedCsv?.substring(Math.max(0, cleanedCsv.length - 500))}`);
-      
+
       // Check if it's a truncation issue
       if (err.message?.includes('Unterminated') || err.message?.includes('Unexpected end')) {
         throw new InternalServerErrorException('AI response was truncated - your data may be too large. Try uploading a smaller file.');
       }
-      
+
       throw new InternalServerErrorException('AI returned invalid JSON format');
     }
-    
+
     this.logger.log(`[cleanCsv] Parsed ${rows.length} rows`);
-    
+
     return { data: rows, rowCount: rows.length, columnCount: rows[0]?.length || 0 };
   }
 
@@ -420,38 +421,38 @@ IMPORTANT: Speak naturally about UI elements users can see. DON'T expose technic
   async cleanLargeCsvText(input: { csvText: string; options?: any }) {
     const { csvText, options } = input;
     if (!csvText) throw new BadRequestException('CSV text is required');
-    
+
     this.logger.log(`[cleanLargeCsvText] Starting, CSV length: ${csvText.length} chars`);
-    
+
     // Parse CSV text into rows
     const rows = this.csvToRows(csvText);
     if (!rows.length) throw new BadRequestException('No rows found in CSV');
-    
+
     const header = rows[0];
     const defaultRowsPerChunk = 200;
     const chunks: any[][][] = [];
-    
+
     // Split into chunks
     for (let i = 1; i < rows.length; i += defaultRowsPerChunk) {
       chunks.push(rows.slice(i, i + defaultRowsPerChunk));
     }
-    
+
     this.logger.log(`[cleanLargeCsvText] Split into ${chunks.length} chunks`);
-    
+
     const results: any[][][] = [];
     const concurrency = Math.min(3, chunks.length);
     const inflight: Promise<void>[] = [];
     let completedCount = 0;
-    
+
     // Emit initial progress
     if (options?.onProgress) {
       options.onProgress(0, chunks.length);
     }
-    
+
     const schedule = (chunk: any[][], idx: number) => {
       const task = (async () => {
         const subResults: any[][] = [];
-        
+
         // Sub-chunking logic (same as cleanLargeCsvToMatrix)
         const makeSubchunks = async (rows: any[][]) => {
           const out: any[][][] = [];
@@ -473,13 +474,13 @@ IMPORTANT: Speak naturally about UI elements users can see. DON'T expose technic
           if (current.length) out.push(current.slice());
           return out;
         };
-        
+
         const subchunks = await makeSubchunks(chunk);
-        
+
         for (let subIndex = 0; subIndex < subchunks.length; subIndex++) {
           const sub = subchunks[subIndex];
           const csv = await this.rowsToCsv([header, ...sub]);
-          
+
           try {
             const cleaned = await this.cleanCsv({ csv, notes: options?.notes } as any);
             if (Array.isArray(cleaned?.data) && cleaned.data.length) {
@@ -489,15 +490,15 @@ IMPORTANT: Speak naturally about UI elements users can see. DON'T expose technic
             }
           } catch (err) {
             this.logger.error(`Chunk ${idx} sub ${subIndex} failed: ${err.message}`);
-            
+
             if (err.message?.includes('too large')) {
               this.logger.log(`Chunk ${idx} sub ${subIndex} still too large, splitting further...`);
-              
+
               const midpoint = Math.floor(sub.length / 2);
               if (midpoint > 0) {
                 const firstHalf = sub.slice(0, midpoint);
                 const secondHalf = sub.slice(midpoint);
-                
+
                 try {
                   const csv1 = await this.rowsToCsv([header, ...firstHalf]);
                   const cleaned1 = await this.cleanCsv({ csv: csv1, notes: options?.notes } as any);
@@ -507,7 +508,7 @@ IMPORTANT: Speak naturally about UI elements users can see. DON'T expose technic
                 } catch (err1) {
                   this.logger.error(`First half of chunk ${idx}.${subIndex} failed: ${err1.message}`);
                 }
-                
+
                 try {
                   const csv2 = await this.rowsToCsv([header, ...secondHalf]);
                   const cleaned2 = await this.cleanCsv({ csv: csv2, notes: options?.notes } as any);
@@ -523,16 +524,16 @@ IMPORTANT: Speak naturally about UI elements users can see. DON'T expose technic
             }
           }
         }
-        
+
         results[idx] = [header, ...subResults];
-        
+
         // Report progress
         completedCount++;
         if (options?.onProgress) {
           options.onProgress(completedCount, chunks.length);
         }
       })();
-      
+
       inflight.push(task);
       task.finally(() => {
         const i = inflight.indexOf(task);
@@ -540,10 +541,10 @@ IMPORTANT: Speak naturally about UI elements users can see. DON'T expose technic
       });
       return task;
     };
-    
+
     chunks.forEach((chunk, idx) => schedule(chunk, idx));
     await Promise.all(inflight);
-    
+
     // Merge & deduplicate
     const merged: any[][] = [header];
     const seen = new Set<string>();
@@ -556,9 +557,9 @@ IMPORTANT: Speak naturally about UI elements users can see. DON'T expose technic
         }
       });
     });
-    
+
     this.logger.log(`[cleanLargeCsvText] Completed, merged ${merged.length - 1} rows (deduplicated)`);
-    
+
     return { data: merged, rowCount: merged.length, columnCount: merged[0]?.length || 0 };
   }
 
@@ -613,160 +614,160 @@ IMPORTANT: Speak naturally about UI elements users can see. DON'T expose technic
   }
 
   /** ========================= LARGE CSV CLEAN ========================= */
- async cleanLargeCsvToMatrix(input: { file: any; options?: { rowsPerChunk?: number; concurrency?: number; notes?: string; onProgress?: (completed: number, total: number) => void } }) {
-  const { file, options } = input;
-  if (!file) throw new BadRequestException('File is required');
-  const buffer = await this.resolveFileBuffer(file);
-  const rows = this.extractRowsFromFile(buffer, file.originalname || file.filename || 'upload');
-  if (!rows.length) throw new BadRequestException('No rows found');
+  async cleanLargeCsvToMatrix(input: { file: any; options?: { rowsPerChunk?: number; concurrency?: number; notes?: string; onProgress?: (completed: number, total: number) => void } }) {
+    const { file, options } = input;
+    if (!file) throw new BadRequestException('File is required');
+    const buffer = await this.resolveFileBuffer(file);
+    const rows = this.extractRowsFromFile(buffer, file.originalname || file.filename || 'upload');
+    if (!rows.length) throw new BadRequestException('No rows found');
 
-  const header = rows[0];
-  const defaultRowsPerChunk = options?.rowsPerChunk ?? 200; // Reduced to 200 rows per chunk
-  const chunks: any[][][] = [];
+    const header = rows[0];
+    const defaultRowsPerChunk = options?.rowsPerChunk ?? 200; // Reduced to 200 rows per chunk
+    const chunks: any[][][] = [];
 
-  // Chia thành các chunks nhỏ
-  for (let i = 1; i < rows.length; i += defaultRowsPerChunk) {
-    chunks.push(rows.slice(i, i + defaultRowsPerChunk));
-  }
+    // Chia thành các chunks nhỏ
+    for (let i = 1; i < rows.length; i += defaultRowsPerChunk) {
+      chunks.push(rows.slice(i, i + defaultRowsPerChunk));
+    }
 
-  const results: any[][][] = [];
-  const concurrency = Math.min(options?.concurrency ?? 3, chunks.length);
-  const inflight: Promise<void>[] = [];
-  let completedCount = 0;
+    const results: any[][][] = [];
+    const concurrency = Math.min(options?.concurrency ?? 3, chunks.length);
+    const inflight: Promise<void>[] = [];
+    let completedCount = 0;
 
-  // Emit initial progress
-  if (options?.onProgress) {
-    options.onProgress(0, chunks.length);
-  }
+    // Emit initial progress
+    if (options?.onProgress) {
+      options.onProgress(0, chunks.length);
+    }
 
-  const schedule = (chunk: any[][], idx: number) => {
-    const task = (async () => {
-      const subResults: any[][] = [];
+    const schedule = (chunk: any[][], idx: number) => {
+      const task = (async () => {
+        const subResults: any[][] = [];
 
-      // Chia subchunk theo ký tự CSV để không vượt CLEAN_MAX_CHARS
-      const makeSubchunks = async (rows: any[][]) => {
-        const out: any[][][] = [];
-        let current: any[][] = [];
-        for (const r of rows) {
-          current.push(r);
-          const csv = await this.rowsToCsv([header, ...current]);
-          // Use 80% of max as safety margin
-          if (csv.length >= this.CLEAN_MAX_CHARS * 0.8) {
-            current.pop();
-            if (current.length === 0) {
-              out.push([r]);
-              current = [];
+        // Chia subchunk theo ký tự CSV để không vượt CLEAN_MAX_CHARS
+        const makeSubchunks = async (rows: any[][]) => {
+          const out: any[][][] = [];
+          let current: any[][] = [];
+          for (const r of rows) {
+            current.push(r);
+            const csv = await this.rowsToCsv([header, ...current]);
+            // Use 80% of max as safety margin
+            if (csv.length >= this.CLEAN_MAX_CHARS * 0.8) {
+              current.pop();
+              if (current.length === 0) {
+                out.push([r]);
+                current = [];
+              } else {
+                out.push(current.slice());
+                current = [r];
+              }
+            }
+          }
+          if (current.length) out.push(current.slice());
+          return out;
+        };
+
+        const subchunks = await makeSubchunks(chunk);
+
+        for (let subIndex = 0; subIndex < subchunks.length; subIndex++) {
+          const sub = subchunks[subIndex];
+          const csv = await this.rowsToCsv([header, ...sub]);
+
+          try {
+            const cleaned = await this.cleanCsv({ csv, notes: options?.notes } as any);
+            if (Array.isArray(cleaned?.data) && cleaned.data.length) {
+              subResults.push(...cleaned.data.slice(1)); // bỏ header
             } else {
-              out.push(current.slice());
-              current = [r];
+              this.logger.warn(`Chunk ${idx} sub ${subIndex}: AI returned no cleaned rows`);
+            }
+          } catch (err) {
+            this.logger.error(`Chunk ${idx} sub ${subIndex} failed: ${err.message}`);
+
+            // If chunk still too large, split it further
+            if (err.message?.includes('too large')) {
+              this.logger.log(`Chunk ${idx} sub ${subIndex} still too large (${csv.length} chars), splitting further...`);
+
+              // Split this subchunk in half and retry
+              const midpoint = Math.floor(sub.length / 2);
+              if (midpoint > 0) {
+                const firstHalf = sub.slice(0, midpoint);
+                const secondHalf = sub.slice(midpoint);
+
+                // Try first half
+                try {
+                  const csv1 = await this.rowsToCsv([header, ...firstHalf]);
+                  const cleaned1 = await this.cleanCsv({ csv: csv1, notes: options?.notes } as any);
+                  if (Array.isArray(cleaned1?.data) && cleaned1.data.length) {
+                    subResults.push(...cleaned1.data.slice(1));
+                  }
+                } catch (err1) {
+                  this.logger.error(`First half of chunk ${idx}.${subIndex} failed: ${err1.message}`);
+                }
+
+                // Try second half
+                try {
+                  const csv2 = await this.rowsToCsv([header, ...secondHalf]);
+                  const cleaned2 = await this.cleanCsv({ csv: csv2, notes: options?.notes } as any);
+                  if (Array.isArray(cleaned2?.data) && cleaned2.data.length) {
+                    subResults.push(...cleaned2.data.slice(1));
+                  }
+                } catch (err2) {
+                  this.logger.error(`Second half of chunk ${idx}.${subIndex} failed: ${err2.message}`);
+                }
+              } else {
+                this.logger.error(`Cannot split further - single row too large`);
+              }
             }
           }
         }
-        if (current.length) out.push(current.slice());
-        return out;
-      };
 
-      const subchunks = await makeSubchunks(chunk);
+        results[idx] = [header, ...subResults];
 
-      for (let subIndex = 0; subIndex < subchunks.length; subIndex++) {
-        const sub = subchunks[subIndex];
-        const csv = await this.rowsToCsv([header, ...sub]);
-        
-        try {
-          const cleaned = await this.cleanCsv({ csv, notes: options?.notes } as any);
-          if (Array.isArray(cleaned?.data) && cleaned.data.length) {
-            subResults.push(...cleaned.data.slice(1)); // bỏ header
-          } else {
-            this.logger.warn(`Chunk ${idx} sub ${subIndex}: AI returned no cleaned rows`);
-          }
-        } catch (err) {
-          this.logger.error(`Chunk ${idx} sub ${subIndex} failed: ${err.message}`);
-          
-          // If chunk still too large, split it further
-          if (err.message?.includes('too large')) {
-            this.logger.log(`Chunk ${idx} sub ${subIndex} still too large (${csv.length} chars), splitting further...`);
-            
-            // Split this subchunk in half and retry
-            const midpoint = Math.floor(sub.length / 2);
-            if (midpoint > 0) {
-              const firstHalf = sub.slice(0, midpoint);
-              const secondHalf = sub.slice(midpoint);
-              
-              // Try first half
-              try {
-                const csv1 = await this.rowsToCsv([header, ...firstHalf]);
-                const cleaned1 = await this.cleanCsv({ csv: csv1, notes: options?.notes } as any);
-                if (Array.isArray(cleaned1?.data) && cleaned1.data.length) {
-                  subResults.push(...cleaned1.data.slice(1));
-                }
-              } catch (err1) {
-                this.logger.error(`First half of chunk ${idx}.${subIndex} failed: ${err1.message}`);
-              }
-              
-              // Try second half
-              try {
-                const csv2 = await this.rowsToCsv([header, ...secondHalf]);
-                const cleaned2 = await this.cleanCsv({ csv: csv2, notes: options?.notes } as any);
-                if (Array.isArray(cleaned2?.data) && cleaned2.data.length) {
-                  subResults.push(...cleaned2.data.slice(1));
-                }
-              } catch (err2) {
-                this.logger.error(`Second half of chunk ${idx}.${subIndex} failed: ${err2.message}`);
-              }
-            } else {
-              this.logger.error(`Cannot split further - single row too large`);
-            }
-          }
+        // Report progress
+        completedCount++;
+        if (options?.onProgress) {
+          options.onProgress(completedCount, chunks.length);
         }
-      }
+      })();
 
-      results[idx] = [header, ...subResults];
-      
-      // Report progress
-      completedCount++;
-      if (options?.onProgress) {
-        options.onProgress(completedCount, chunks.length);
-      }
-    })();
+      inflight.push(task);
+      task.finally(() => {
+        const i = inflight.indexOf(task);
+        if (i >= 0) inflight.splice(i, 1);
+      });
+      return task;
+    };
 
-    inflight.push(task);
-    task.finally(() => {
-      const i = inflight.indexOf(task);
-      if (i >= 0) inflight.splice(i, 1);
+    chunks.forEach((chunk, idx) => schedule(chunk, idx));
+    await Promise.all(inflight);
+
+    // Merge & deduplicate
+    const merged: any[][] = [header];
+    const seen = new Set<string>();
+    results.forEach(chunkRows => {
+      chunkRows.slice(1).forEach(row => {
+        const key = JSON.stringify(row);
+        if (!seen.has(key)) { seen.add(key); merged.push(row); }
+      });
     });
-    return task;
-  };
 
-  chunks.forEach((chunk, idx) => schedule(chunk, idx));
-  await Promise.all(inflight);
-
-  // Merge & deduplicate
-  const merged: any[][] = [header];
-  const seen = new Set<string>();
-  results.forEach(chunkRows => {
-    chunkRows.slice(1).forEach(row => {
-      const key = JSON.stringify(row);
-      if (!seen.has(key)) { seen.add(key); merged.push(row); }
-    });
-  });
-
-  return merged;
-}
+    return merged;
+  }
 
   /** ========================= EXCEL CLEAN ========================= */
   async cleanExcelToMatrix(input: { file: any; options?: { notes?: string; onProgress?: (completed: number, total: number) => void } }) {
     const { file, options } = input;
     if (!file) throw new BadRequestException('File is required');
     const filename = (file?.originalname || file?.filename || '').toLowerCase();
-    
+
     this.logger.log(`[cleanExcelToMatrix] Processing file: ${filename}`);
-    
+
     // CSV files always use chunked cleaning
     if (filename.endsWith('.csv')) {
       this.logger.log(`[cleanExcelToMatrix] Detected CSV file, using cleanLargeCsvToMatrix`);
       return this.cleanLargeCsvToMatrix({ file, options });
     }
-    
+
     // For Excel files, extract rows first
     this.logger.log(`[cleanExcelToMatrix] Resolving file buffer...`);
     const buffer = await this.resolveFileBuffer(file);
@@ -792,25 +793,306 @@ IMPORTANT: Speak naturally about UI elements users can see. DON'T expose technic
 
     // Small Excel files: clean directly (still report progress as 1/1 chunk)
     this.logger.log(`[cleanExcelToMatrix] Small file (${rows.length} rows), cleaning directly...`);
-    
+
     if (options?.onProgress) {
       this.logger.debug(`[cleanExcelToMatrix] Reporting initial progress: 0/1`);
       options.onProgress(0, 1);
     }
-    
+
     this.logger.log(`[cleanExcelToMatrix] Converting rows to CSV...`);
     const csv = await this.rowsToCsv(rows);
     this.logger.log(`[cleanExcelToMatrix] CSV length: ${csv.length} chars, calling cleanCsv...`);
-    
+
     const cleaned = await this.cleanCsv({ csv, notes: options?.notes } as any);
-    
+
     this.logger.log(`[cleanExcelToMatrix] Cleaning completed, rows: ${cleaned.rowCount}`);
-    
+
     if (options?.onProgress) {
       this.logger.debug(`[cleanExcelToMatrix] Reporting final progress: 1/1`);
       options.onProgress(1, 1);
     }
-    
+
     return { data: cleaned.data, rowCount: cleaned.rowCount, columnCount: cleaned.columnCount };
+  }
+
+  /** ========================= FORECAST ========================= */
+  async forecast(options?: {
+    csvData?: string;
+    targetColumn?: string;
+    featureColumns?: string[];
+    timeScale?: string;
+    forecastWindow?: number;
+  }) {
+    this.logger.log('[forecast] Starting forecast execution');
+
+    // Validate required parameters
+    if (!options?.csvData) {
+      throw new BadRequestException('CSV data is required for forecast');
+    }
+    if (!options?.targetColumn) {
+      throw new BadRequestException('Target column is required for forecast');
+    }
+
+    this.logger.log('[forecast] Running in PRODUCTION MODE with real dataset');
+
+    // Resolve script path - works in both dev (src/) and production (dist/)
+    // __dirname in compiled JS will be dist/modules/ai, so we go up to find src
+    const isProduction = __dirname.includes('dist');
+    const baseDir = isProduction
+      ? path.join(__dirname, '..', '..', '..', 'src', 'modules', 'ai')
+      : __dirname;
+    const scriptPath = path.join(baseDir, 'ai-model', 'AI_Training.py');
+
+    // Check if script exists
+    if (!fs.existsSync(scriptPath)) {
+      this.logger.error(`[forecast] Script not found at: ${scriptPath}`);
+      throw new InternalServerErrorException('Forecast script not found');
+    }
+
+    // Prepare Python script options
+    // Use virtual environment Python with TensorFlow 2.16.1
+    // Derive project root from script path: scriptPath is at src/modules/ai/ai-model/AI_Training.py
+    // So we go up 4 levels from scriptPath to get to project root (ai-model -> ai -> modules -> src -> BE_WEB)
+    const scriptDir = path.dirname(scriptPath);
+    const projectRoot = path.resolve(scriptDir, '..', '..', '..', '..');
+    const venvPythonPath = path.resolve(projectRoot, 'venv_tf', 'Scripts', 'python.exe');
+
+    // Log paths for debugging
+    this.logger.debug(`[forecast] Script dir: ${scriptDir}`);
+    this.logger.debug(`[forecast] Project root: ${projectRoot}`);
+    this.logger.debug(`[forecast] Python venv path: ${venvPythonPath}`);
+
+    // Verify the Python executable exists
+    if (!fs.existsSync(venvPythonPath)) {
+      this.logger.error(`[forecast] Python venv not found at: ${venvPythonPath}`);
+      throw new InternalServerErrorException(`Python virtual environment not found at: ${venvPythonPath}`);
+    }
+
+    // If CSV data is provided, write it to a temp file and pass as argument
+    let tempFilePath: string | null = null;
+    const scriptArgs: string[] = [];
+
+    if (options?.csvData) {
+      try {
+        const aiModelDir = path.dirname(scriptPath);
+        tempFilePath = path.join(aiModelDir, `temp_data_${Date.now()}.csv`);
+        await fs.promises.writeFile(tempFilePath, options.csvData, 'utf8');
+        scriptArgs.push(tempFilePath);
+        this.logger.log(`[forecast] Created temp CSV file: ${tempFilePath}`);
+        this.logger.log(`[forecast] CSV file will be passed to Python script as argument (PRODUCTION MODE)`);
+      } catch (err: any) {
+        this.logger.error(`[forecast] Failed to write temp CSV: ${err.message}`);
+        throw new InternalServerErrorException('Failed to prepare CSV data');
+      }
+    } else {
+      this.logger.error(`[forecast] No CSV data provided - this should never happen in production!`);
+      throw new BadRequestException('CSV data is required');
+    }
+
+    // Prepare environment variables for Python script
+    const pythonEnv: Record<string, string> = {
+      ...process.env,
+      PYTHONPATH: '', // Clear PYTHONPATH to avoid conflicts with D:\python-packages
+    };
+
+    // Add forecast parameters as environment variables
+    if (options?.targetColumn) {
+      pythonEnv.TARGET_COLUMN = options.targetColumn;
+    }
+    if (options?.timeScale) {
+      pythonEnv.TIME_SCALE = options.timeScale;
+    }
+    if (options?.forecastWindow) {
+      pythonEnv.FORECAST_WINDOW = options.forecastWindow.toString();
+    }
+
+    this.logger.log(`[forecast] Using dataset CSV data and forecast parameters`);
+
+    const pythonOptions: any = {
+      mode: 'text' as const,
+      pythonPath: venvPythonPath, // Use venv Python with TensorFlow 2.16.1
+      pythonOptions: ['-u'], // Unbuffered output
+      scriptPath: path.dirname(scriptPath),
+      args: scriptArgs, // Pass command line arguments to the script (CSV file path)
+      env: pythonEnv,
+    };
+
+    return new Promise<{ stdout: string[]; stderr: string[]; exitCode: number; forecastData?: any; chartImageUrl?: string | null }>((resolve, reject) => {
+      const stdout: string[] = [];
+      const stderr: string[] = [];
+
+      const pyshell = new PythonShell('AI_Training.py', pythonOptions);
+
+      // Collect stdout
+      pyshell.on('message', (message: string) => {
+        stdout.push(message);
+        this.logger.debug(`[forecast] stdout: ${message}`);
+      });
+
+      // Collect stderr
+      pyshell.on('stderr', (message: string) => {
+        stderr.push(message);
+        this.logger.warn(`[forecast] stderr: ${message}`);
+      });
+
+      // Handle completion
+      pyshell.end(async (err, code, signal) => {
+        // Clean up temp file if created
+        if (tempFilePath && fs.existsSync(tempFilePath)) {
+          fs.promises.unlink(tempFilePath).catch((unlinkErr) => {
+            this.logger.warn(`[forecast] Failed to delete temp file: ${unlinkErr.message}`);
+          });
+        }
+
+        if (err) {
+          const fullError = stderr.length > 0
+            ? stderr.join('\n')
+            : err.message;
+          this.logger.error(`[forecast] Python script error: ${fullError}`);
+          this.logger.error(`[forecast] Exit code: ${code}, Signal: ${signal}`);
+          this.logger.error(`[forecast] Last stdout lines: ${stdout.slice(-10).join('\n')}`);
+          reject(new InternalServerErrorException(`Forecast script failed: ${fullError.substring(0, 500)}`));
+          return;
+        }
+
+        // Filter out TensorFlow info messages from stderr (they're not real errors)
+        const realErrors = stderr.filter(line => {
+          const lower = line.toLowerCase();
+          return !lower.includes('tensorflow') &&
+            !lower.includes('onednn') &&
+            !lower.includes('cpu_feature_guard') &&
+            !lower.includes('i tensorflow') &&
+            line.trim().length > 0;
+        });
+
+        // Check if script failed with non-zero exit code AND has real errors
+        if (code !== 0 && code !== null && realErrors.length > 0) {
+          const errorOutput = realErrors.length > 0
+            ? realErrors.join('\n')
+            : stdout.slice(-20).join('\n');
+          this.logger.error(`[forecast] Script exited with code ${code}`);
+          this.logger.error(`[forecast] Error output: ${errorOutput}`);
+          reject(new InternalServerErrorException(`Forecast script failed with exit code ${code}: ${errorOutput.substring(0, 500)}`));
+          return;
+        }
+
+        // If exit code is non-zero but only TensorFlow warnings, treat as success
+        let finalExitCode = code || 0;
+        if (code !== 0 && code !== null && realErrors.length === 0) {
+          this.logger.warn(`[forecast] Script exited with code ${code} but only TensorFlow warnings, treating as success`);
+          finalExitCode = 0; // Normalize to success
+        }
+
+        // Filter stderr to remove TensorFlow warnings before returning
+        const filteredStderr = realErrors;
+
+        // Parse JSON from stdout if present
+        let forecastData = null;
+        const stdoutText = stdout.join('\n');
+        const jsonStartMarker = '<FORECAST_JSON_START>';
+        const jsonEndMarker = '<FORECAST_JSON_END>';
+
+        const jsonStartIndex = stdoutText.indexOf(jsonStartMarker);
+        const jsonEndIndex = stdoutText.indexOf(jsonEndMarker);
+
+        this.logger.log(`[forecast] Looking for JSON markers: startIndex=${jsonStartIndex}, endIndex=${jsonEndIndex}`);
+
+        if (jsonStartIndex !== -1 && jsonEndIndex !== -1) {
+          try {
+            const jsonText = stdoutText.substring(
+              jsonStartIndex + jsonStartMarker.length,
+              jsonEndIndex
+            ).trim();
+            this.logger.log(`[forecast] Extracted JSON text length: ${jsonText.length} chars`);
+            this.logger.log(`[forecast] First 200 chars of JSON: ${jsonText.substring(0, 200)}`);
+            forecastData = JSON.parse(jsonText);
+            this.logger.log(`[forecast] Successfully parsed forecast JSON data. Predictions: ${forecastData.predictions?.length || 0}`);
+          } catch (parseError: any) {
+            this.logger.warn(`[forecast] Failed to parse forecast JSON: ${parseError.message}`);
+            this.logger.warn(`[forecast] JSON text that failed: ${stdoutText.substring(jsonStartIndex + jsonStartMarker.length, jsonEndIndex).substring(0, 500)}`);
+          }
+        } else {
+          this.logger.warn(`[forecast] JSON markers not found in stdout. Last 500 chars of stdout: ${stdoutText.slice(-500)}`);
+
+          // Fallback: Try to find JSON-like structure anywhere in stdout (look for "predictions" key)
+          try {
+            const jsonMatch = stdoutText.match(/\{[\s\S]*"predictions"[\s\S]*\}/);
+            if (jsonMatch) {
+              this.logger.log(`[forecast] Found JSON-like structure without markers, attempting to parse...`);
+              forecastData = JSON.parse(jsonMatch[0]);
+              this.logger.log(`[forecast] Successfully parsed forecast JSON from fallback method. Predictions: ${forecastData.predictions?.length || 0}`);
+            }
+          } catch (fallbackError: any) {
+            this.logger.warn(`[forecast] Fallback JSON parsing also failed: ${fallbackError.message}`);
+          }
+        }
+
+        this.logger.log(`[forecast] Script completed successfully with exit code: ${finalExitCode}`);
+        this.logger.log(`[forecast] Output lines: ${stdout.length}, Real error lines: ${filteredStderr.length}`);
+
+        // Copy forecast chart image to public/uploads if it exists
+        let chartImageUrl: string | null = null;
+        if (finalExitCode === 0) {
+          try {
+            const scriptDir = path.dirname(scriptPath);
+            const sourceImagePath = path.join(scriptDir, 'forecast_plot.png');
+            
+            if (fs.existsSync(sourceImagePath)) {
+              // Create public/uploads/forecasts directory if it doesn't exist
+              const publicDir = path.join(projectRoot, 'public', 'uploads', 'forecasts');
+              if (!fs.existsSync(publicDir)) {
+                fs.mkdirSync(publicDir, { recursive: true });
+              }
+
+              // Generate unique filename using timestamp
+              const timestamp = Date.now();
+              const randomSuffix = Math.random().toString(36).substring(2, 8);
+              const filename = `forecast-${timestamp}-${randomSuffix}.png`;
+              const destImagePath = path.join(publicDir, filename);
+
+              // Copy the image
+              await fs.promises.copyFile(sourceImagePath, destImagePath);
+              this.logger.log(`[forecast] Chart image copied to: ${destImagePath}`);
+
+              // Generate public URL path (relative to public folder)
+              chartImageUrl = `/uploads/forecasts/${filename}`;
+              this.logger.log(`[forecast] Chart image URL: ${chartImageUrl}`);
+
+              // Clean up all generated images from script directory (we only need forecast_plot.png)
+              const imagesToCleanup = [
+                sourceImagePath, // forecast_plot.png (already copied)
+                path.join(scriptDir, 'training_predictions.png'),
+                path.join(scriptDir, 'model_diagnosis_lstm.png'),
+                path.join(scriptDir, 'model_diagnosis_svr.png'),
+              ];
+
+              for (const imagePath of imagesToCleanup) {
+                if (fs.existsSync(imagePath)) {
+                  await fs.promises.unlink(imagePath).catch((unlinkErr) => {
+                    this.logger.warn(`[forecast] Failed to delete ${imagePath}: ${unlinkErr.message}`);
+                  });
+                }
+              }
+              this.logger.log(`[forecast] Cleaned up temporary images from script directory`);
+            } else {
+              this.logger.warn(`[forecast] Forecast plot image not found at: ${sourceImagePath}`);
+            }
+          } catch (imageError: any) {
+            this.logger.error(`[forecast] Failed to copy chart image: ${imageError.message}`);
+            // Don't fail the entire request if image copy fails
+          }
+        }
+
+        resolve({
+          stdout,
+          stderr: filteredStderr, // Return only real errors, not TensorFlow warnings
+          exitCode: finalExitCode,
+          forecastData, // Include parsed forecast data
+          chartImageUrl, // Include chart image URL if available
+        });
+      });
+
+      // Arguments are already passed via pythonOptions.args
+    });
   }
 }

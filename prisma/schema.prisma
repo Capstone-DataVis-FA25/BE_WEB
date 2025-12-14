@@ -67,6 +67,7 @@ model Dataset {
   headers            DataHeader[]
   user               User           @relation(fields: [userId], references: [id], onDelete: Cascade)
   chartHistory       ChartHistory[]
+  forecasts         Forecast[]
 }
 
 model User {
@@ -172,4 +173,25 @@ enum PaymentStatus {
   COMPLETED
   FAILED
   REFUNDED
+}
+
+model Forecast {
+  id            String    @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  datasetId     String?   @db.Uuid
+  name          String?
+  targetColumn  String
+  featureColumns String[]  @default([])
+  timeScale     String
+  forecastWindow Int
+  modelType     String
+  predictions   Json      // Array of prediction objects
+  metrics       Json?     // Model performance metrics
+  analyze       String?   // AI-generated analysis text (populated later)
+  chartImageUrl String?   // URL of the generated chart image
+  createdAt     DateTime  @default(now())
+  updatedAt     DateTime  @updatedAt
+  dataset       Dataset?  @relation(fields: [datasetId], references: [id], onDelete: SetNull)
+
+  @@index([datasetId])
+  @@index([createdAt])
 }

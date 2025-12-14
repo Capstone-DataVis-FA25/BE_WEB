@@ -1,4 +1,4 @@
-import { Controller, Post, Body, HttpException, HttpStatus, UploadedFile, UseInterceptors, HttpCode, Query, Get, Req, UseGuards, Request } from '@nestjs/common';
+import { Controller, Post, Body, HttpException, HttpStatus, UploadedFile, UseInterceptors, HttpCode, Query, Get, Req, UseGuards, Request, Param } from '@nestjs/common';
 import { ApiBody, ApiConsumes, ApiOkResponse, ApiOperation, ApiTags, ApiQuery, ApiBearerAuth } from '@nestjs/swagger';
 import { FileInterceptor } from '@nestjs/platform-express';
 import { diskStorage } from 'multer';
@@ -11,6 +11,9 @@ import { EvaluateChartDto } from './dto/evaluate-chart.dto';
 import { AiChartEvaluationService } from './ai.chart-evaluation.service';
 import { JwtAccessTokenGuard } from '@modules/auth/guards/jwt-access-token.guard';
 import { AuthRequest } from '@modules/auth/auth.controller';
+import { ForecastDto } from './dto/forecast.dto';
+import { ForecastProcessingService } from '../forecasts/forecast-processing.service';
+import { ForecastCreationJobService } from '../forecasts/forecast-creation.job';
 
 
 @ApiTags('ai')
@@ -21,14 +24,16 @@ export class AiController {
     private readonly aiService: AiService,
     private readonly aiCleanJobService: AiCleanJobService,
     private readonly aiChartEvaluationService: AiChartEvaluationService,
-  ) {}
+    private readonly forecastProcessingService: ForecastProcessingService,
+    private readonly forecastCreationJobService: ForecastCreationJobService,
+  ) { }
 
   @Post('chat-with-ai')
   @ApiBody({ type: ChatWithAiDto })
   async chatWithAi(@Body() body: ChatWithAiDto) {
     if (!body.message) throw new HttpException('❌ Vui lòng gửi tin nhắn', HttpStatus.BAD_REQUEST);
     try {
-      return await this.aiService.chatWithAi( body.message, body.messages, body.language);
+      return await this.aiService.chatWithAi(body.message, body.messages, body.language);
     } catch (e: any) {
       throw new HttpException({ success: false, message: e.message }, HttpStatus.INTERNAL_SERVER_ERROR);
     }
@@ -38,24 +43,24 @@ export class AiController {
   @Post('clean')
   @HttpCode(HttpStatus.OK)
   @ApiOperation({ summary: 'Clean CSV data and return a 2D JSON array' })
-  @ApiOkResponse({ 
-    description: '2D JSON array of cleaned data', 
-    schema: { 
+  @ApiOkResponse({
+    description: '2D JSON array of cleaned data',
+    schema: {
       type: 'object',
       properties: {
         data: {
-          type: 'array', 
-          items: { 
-            type: 'array', 
-            items: { 
-              oneOf: [{ type: 'string' }, { type: 'number' }, { type: 'null' }] 
-            } 
+          type: 'array',
+          items: {
+            type: 'array',
+            items: {
+              oneOf: [{ type: 'string' }, { type: 'number' }, { type: 'null' }]
+            }
           }
         },
         rowCount: { type: 'number' },
         columnCount: { type: 'number' }
       }
-    } 
+    }
   })
   async clean(@Body() body: CleanCsvDto) {
     const result = await this.aiService.cleanCsv(body);
@@ -67,24 +72,24 @@ export class AiController {
   @ApiOperation({ summary: 'Clean data from an uploaded Excel/CSV file and return a 2D JSON array' })
   @ApiConsumes('multipart/form-data')
   @ApiBody({ type: CleanExcelUploadDto })
-  @ApiOkResponse({ 
-    description: '2D JSON array of cleaned data', 
-    schema: { 
+  @ApiOkResponse({
+    description: '2D JSON array of cleaned data',
+    schema: {
       type: 'object',
       properties: {
         data: {
-          type: 'array', 
-          items: { 
-            type: 'array', 
-            items: { 
-              oneOf: [{ type: 'string' }, { type: 'number' }, { type: 'null' }] 
-            } 
+          type: 'array',
+          items: {
+            type: 'array',
+            items: {
+              oneOf: [{ type: 'string' }, { type: 'number' }, { type: 'null' }]
+            }
           }
         },
         rowCount: { type: 'number' },
         columnCount: { type: 'number' }
       }
-    } 
+    }
   })
   @UseInterceptors(FileInterceptor('file', {
     limits: { fileSize: 20 * 1024 * 1024 }, // 20MB
@@ -243,12 +248,12 @@ export class AiController {
   @Post('evaluate-chart')
   @UseGuards(JwtAccessTokenGuard)
   @HttpCode(HttpStatus.OK)
-  @ApiOperation({ 
+  @ApiOperation({
     summary: 'Evaluate a chart using AI based on its image and dataset',
     description: 'Send chart image (base64) and chart ID to get AI-powered evaluation and recommendations'
   })
   @ApiBody({ type: EvaluateChartDto })
-  @ApiOkResponse({ 
+  @ApiOkResponse({
     description: 'Chart evaluation completed successfully',
     schema: {
       type: 'object',
@@ -267,7 +272,7 @@ export class AiController {
       return result;
     } catch (e: any) {
       throw new HttpException(
-        { success: false, message: e.message }, 
+        { success: false, message: e.message },
         e.status || HttpStatus.INTERNAL_SERVER_ERROR
       );
     }
@@ -275,23 +280,87 @@ export class AiController {
   @Get('clean-progress')
   @ApiOperation({ summary: 'Get current cleaning progress for a jobId' })
   @ApiQuery({ name: 'jobId', required: true, description: 'Job ID to check progress' })
-  @ApiOkResponse({ 
-    description: 'Current progress', 
-    schema: { 
-      type: 'object', 
-      properties: { 
+  @ApiOkResponse({
+    description: 'Current progress',
+    schema: {
+      type: 'object',
+      properties: {
         jobId: { type: 'string' },
         status: { type: 'string' },
         progress: { type: 'number' },
         totalChunks: { type: 'number' },
         completedChunks: { type: 'number' }
-      } 
-    } 
+      }
+    }
   })
   async getCleanProgress(@Query('jobId') jobId: string) {
     if (!jobId) throw new HttpException('Missing jobId', HttpStatus.BAD_REQUEST);
     const progress = this.aiCleanJobService.getJobProgress(jobId);
     if (!progress) throw new HttpException('Job not found', HttpStatus.NOT_FOUND);
     return { code: 200, message: 'Success', data: progress };
+  }
+
+  @Post('forecast')
+  @UseGuards(JwtAccessTokenGuard)
+  @HttpCode(HttpStatus.OK)
+  @ApiOperation({
+    summary: 'Generate time series forecast (async)',
+    description: 'Starts an async job to generate time series forecasts. Returns jobId immediately. You will be notified when the forecast is complete.'
+  })
+  @ApiBody({ type: ForecastDto })
+  @ApiOkResponse({
+    description: 'Forecast job started',
+    schema: {
+      type: 'object',
+      properties: {
+        success: { type: 'boolean' },
+        jobId: { type: 'string' },
+        message: { type: 'string' }
+      }
+    }
+  })
+  async forecast(@Body() dto: ForecastDto, @Request() req: AuthRequest) {
+    try {
+      const userId = req.user.userId || req.user.sub;
+
+      // Create async job and return jobId immediately
+      const jobId = this.forecastCreationJobService.createJob(userId, dto);
+
+      return {
+        success: true,
+        jobId,
+        message: 'Forecast job started. You will be notified when it completes.',
+      };
+    } catch (e: any) {
+      if (e instanceof HttpException) {
+        throw e;
+      }
+      throw new HttpException(
+        e.message || 'Failed to start forecast job',
+        e.status || HttpStatus.INTERNAL_SERVER_ERROR
+      );
+    }
+  }
+
+  @Get('forecast/:jobId/status')
+  @UseGuards(JwtAccessTokenGuard)
+  @ApiOperation({ summary: 'Get forecast creation job status' })
+  getForecastJobStatus(@Param('jobId') jobId: string, @Request() req: AuthRequest) {
+    const status = this.forecastCreationJobService.getJobStatus(jobId);
+    if (!status) {
+      throw new HttpException('Job not found', HttpStatus.NOT_FOUND);
+    }
+    return status;
+  }
+
+  @Get('forecast/:jobId/result')
+  @UseGuards(JwtAccessTokenGuard)
+  @ApiOperation({ summary: 'Get forecast creation job result' })
+  getForecastJobResult(@Param('jobId') jobId: string, @Request() req: AuthRequest) {
+    const result = this.forecastCreationJobService.getJobResult(jobId);
+    if (!result) {
+      throw new HttpException('Job not found or not completed', HttpStatus.NOT_FOUND);
+    }
+    return result;
   }
 }

@@ -9,6 +9,8 @@ import { ConfigService } from "@nestjs/config";
 import { EvaluateChartDto } from "./dto/evaluate-chart.dto";
 import { PrismaService } from "../../prisma/prisma.service";
 import { KmsService } from "@modules/kms/kms.service";
+import * as fs from "fs";
+import * as path from "path";
 
 @Injectable()
 export class AiChartEvaluationService {
@@ -34,9 +36,8 @@ export class AiChartEvaluationService {
     };
   }
 
-  private async postChat(body: any, tag?: string): Promise<any> {
+  private async postChat(body: any, tag?: string, maxAttempts: number = 3): Promise<any> {
     const url = `${this.baseUrl}/chat/completions`;
-    const maxAttempts = 3;
     let lastErr: any = null;
 
     for (let attempt = 1; attempt <= maxAttempts; attempt++) {
@@ -194,7 +195,7 @@ export class AiChartEvaluationService {
     const selectedColumns = dto.selectedColumns || [];
 
     console.log('selectedColumns: ', selectedColumns);
-    
+
     this.logger.debug(`[evaluateChart] Selected columns from frontend: ${selectedColumns.join(', ')}`);
 
     // 3. Build dataset sample (first 50 rows for context)
@@ -335,23 +336,23 @@ ${dto.questions.map((q, i) => `${i + 1}. ${q}`).join("<br>")}
     const requiredSections =
       language === "vi"
         ? [
-            "1. Phân tích dữ liệu chi tiết",
-            "2. Đánh giá loại biểu đồ và tính phù hợp",
-            "3. Điểm mạnh của trực quan hóa hiện tại",
-            "4. Điểm yếu hoặc các khía cạnh cần cải thiện",
-            "5. Đề xuất cụ thể",
-            "6. Thông tin chi tiết và thống kê bổ sung",
-            "7. Đề xuất các phương án trực quan hóa thay thế",
-          ]
+          "1. Phân tích dữ liệu chi tiết",
+          "2. Đánh giá loại biểu đồ và tính phù hợp",
+          "3. Điểm mạnh của trực quan hóa hiện tại",
+          "4. Điểm yếu hoặc các khía cạnh cần cải thiện",
+          "5. Đề xuất cụ thể",
+          "6. Thông tin chi tiết và thống kê bổ sung",
+          "7. Đề xuất các phương án trực quan hóa thay thế",
+        ]
         : [
-            "1. Detailed Data Analysis",
-            "2. Chart Type and Suitability Evaluation",
-            "3. Strengths of Current Visualization",
-            "4. Weaknesses or Areas for Improvement",
-            "5. Specific Recommendations",
-            "6. Additional Insights and Statistics",
-            "7. Proposed Visualization Alternatives",
-          ];
+          "1. Detailed Data Analysis",
+          "2. Chart Type and Suitability Evaluation",
+          "3. Strengths of Current Visualization",
+          "4. Weaknesses or Areas for Improvement",
+          "5. Specific Recommendations",
+          "6. Additional Insights and Statistics",
+          "7. Proposed Visualization Alternatives",
+        ];
 
     userPrompt += `
 Please analyze the chart image and dataset following this structure:
@@ -438,5 +439,218 @@ Your entire response must be written 100% in ${language}, and you are NOT allowe
       },
       processingTime: elapsed,
     };
+  }
+
+  /**
+   * Analyze forecast chart image using Gemini AI
+   * @param forecastId Forecast ID
+   * @param chartImageUrl Chart image URL path (e.g., /uploads/forecasts/forecast-xxx.png)
+   * @returns Analysis text
+   */
+  async analyzeForecastChart(
+    forecastId: string,
+    chartImageUrl: string,
+    maxAttempts: number = 3,
+  ): Promise<string | null> {
+    const start = Date.now();
+    this.logger.log(
+      `[analyzeForecastChart] Starting analysis for forecast ${forecastId}`
+    );
+
+    if (!this.apiKey) {
+      this.logger.warn("OPENROUTER_API_KEY is not configured, skipping analysis");
+      return null;
+    }
+
+    try {
+      // Remove leading slash and resolve path
+      const imagePath = chartImageUrl.startsWith('/')
+        ? chartImageUrl.substring(1)
+        : chartImageUrl;
+
+      // Resolve project root using the same method as ai.service.ts
+      // This ensures consistency with where the image was saved
+      const isProduction = __dirname.includes('dist');
+
+      // Get the script directory path (same as ai.service.ts)
+      const baseDir = isProduction
+        ? path.join(__dirname, '..', '..', '..', 'src', 'modules', 'ai')
+        : __dirname;
+
+      // Construct the script path to get the script directory
+      const scriptPath = path.join(baseDir, 'ai-model', 'AI_Training.py');
+      const scriptDir = path.dirname(scriptPath);
+
+      // From scriptDir (src/modules/ai/ai-model), go up 4 levels to get to BE_WEB root
+      // ai-model -> ai -> modules -> src -> BE_WEB
+      const projectRoot = path.resolve(scriptDir, '..', '..', '..', '..');
+
+      const fullImagePath = path.join(projectRoot, 'public', imagePath);
+
+      this.logger.log(`[analyzeForecastChart] Resolved project root: ${projectRoot}`);
+      this.logger.log(`[analyzeForecastChart] Script dir: ${scriptDir}`);
+
+      this.logger.log(`[analyzeForecastChart] Looking for image at: ${fullImagePath}`);
+      this.logger.log(`[analyzeForecastChart] Image exists: ${fs.existsSync(fullImagePath)}`);
+
+      if (!fs.existsSync(fullImagePath)) {
+        this.logger.warn(`[analyzeForecastChart] Image not found at: ${fullImagePath}`);
+        this.logger.warn(`[analyzeForecastChart] Chart image URL: ${chartImageUrl}`);
+        return null;
+      }
+
+      // Read image file and convert to base64
+      const imageBuffer = fs.readFileSync(fullImagePath);
+      const base64Image = imageBuffer.toString('base64');
+      const imageDataUrl = `data:image/png;base64,${base64Image}`;
+
+      this.logger.log(`[analyzeForecastChart] Image loaded, size: ${imageBuffer.length} bytes`);
+      this.logger.log(`[analyzeForecastChart] Base64 length: ${base64Image.length} chars`);
+
+      // Build AI prompt for forecast analysis
+      const systemPrompt = `You are an expert data analyst specializing in time series forecasting and prediction analysis. 
+Analyze the forecast chart image provided and provide insights about the DATA and PREDICTIONS ONLY. Do NOT comment on the model itself, model performance, or technical aspects of the forecasting method.
+
+Focus your analysis on:
+
+1. **Trend Analysis**: 
+   - What trends do you observe in the historical data?
+   - How does the forecast trend compare to historical patterns?
+   - Are there any significant changes or anomalies in the data?
+
+2. **Forecast Quality Assessment**:
+   - Does the forecast appear reasonable based on historical data patterns?
+   - Are there any concerning patterns or unexpected predictions in the forecasted values?
+   - What does the confidence interval tell us about prediction uncertainty?
+
+3. **Key Insights**:
+   - What are the main takeaways from this forecast?
+   - What should decision-makers pay attention to?
+   - Are there any actionable recommendations based on the predictions?
+
+4. **Potential Concerns**:
+   - Are there any red flags or areas of uncertainty in the predictions?
+   - What factors might affect the accuracy of these predictions?
+
+CRITICAL: 
+- Focus ONLY on the topic being forecasted and the predictions themselves
+- Do NOT mention the model type, model performance, overfitting, or technical model details
+- Do NOT comment on whether the model is good or bad
+- Focus on what the data and predictions tell us about the business/topic
+
+IMPORTANT: You must provide the analysis in BOTH English and Vietnamese. Format your response EXACTLY as follows (return ONLY the sections, no other text):
+
+---ENGLISH---
+1. Trend Analysis
+
+[Your trend analysis in English here]
+
+2. Forecast Quality Assessment
+
+[Your quality assessment in English here]
+
+3. Key Insights
+
+[Your key insights in English here]
+
+4. Potential Concerns
+
+[Your concerns in English here]
+
+5. Actionable Recommendations
+
+[Your recommendations in English here]
+
+---VIETNAMESE---
+1. Phân tích xu hướng
+
+[Phân tích xu hướng của bạn bằng tiếng Việt ở đây]
+
+2. Đánh giá chất lượng dự báo
+
+[Đánh giá chất lượng của bạn bằng tiếng Việt ở đây]
+
+3. Những hiểu biết chính
+
+[Những hiểu biết chính của bạn bằng tiếng Việt ở đây]
+
+4. Những lo ngại tiềm ẩn
+
+[Những lo ngại của bạn bằng tiếng Việt ở đây]
+
+5. Đề xuất hành động
+
+[Đề xuất của bạn bằng tiếng Việt ở đây]
+
+Return ONLY these sections with the exact section headers shown above. Do not add any introductory text, conclusions, or additional commentary outside of these sections.`;
+
+      const userPrompt = `Please analyze this forecast chart image. The chart shows historical data and future predictions. 
+Provide a comprehensive analysis in BOTH English and Vietnamese, separated by the markers ---ENGLISH--- and ---VIETNAMESE---.
+Focus ONLY on the topic being forecasted and the predictions themselves. Do NOT comment on the model, model performance, or technical aspects.
+Return ONLY the 5 sections listed in the system prompt with the exact section headers.`;
+
+      // Call OpenRouter API with Gemini vision model
+      const modelMessages = [
+        { role: "system", content: systemPrompt },
+        {
+          role: "user",
+          content: [
+            {
+              type: "text",
+              text: userPrompt,
+            },
+            {
+              type: "image_url",
+              image_url: {
+                url: imageDataUrl,
+              },
+            },
+          ],
+        },
+      ];
+
+      const body = {
+        model: "google/gemini-2.0-flash-exp:free", // Use Gemini 2.0 Flash (free tier, supports vision)
+        messages: modelMessages,
+        temperature: 0.7,
+        max_tokens: 3000, // Increased for bilingual content (English + Vietnamese)
+      };
+
+      this.logger.log(
+        `[analyzeForecastChart] Calling OpenRouter API with Gemini model: ${body.model}`
+      );
+      this.logger.log(
+        `[analyzeForecastChart] Sending image (base64 length: ${imageDataUrl.length}) and prompt to Gemini...`
+      );
+      this.logger.log(
+        `[analyzeForecastChart] Max attempts: ${maxAttempts}`
+      );
+
+      const resData = await this.postChat(body, "analyzeForecastChart", maxAttempts);
+
+      // Extract and clean response
+      const rawContent = this.extractAiContent(resData);
+      const cleanedContent = rawContent.trim();
+      const elapsed = Date.now() - start;
+
+      this.logger.log(`[analyzeForecastChart] Completed in ${elapsed}ms`);
+      this.logger.log(`[analyzeForecastChart] Analysis length: ${cleanedContent.length} chars`);
+      this.logger.debug(`[analyzeForecastChart] Analysis preview: ${cleanedContent.substring(0, 200)}...`);
+
+      if (!cleanedContent || cleanedContent.length === 0) {
+        this.logger.warn(`[analyzeForecastChart] Received empty analysis from Gemini`);
+        return null;
+      }
+
+      // Return the full bilingual response (will be parsed by frontend based on language)
+      // Format: ---ENGLISH---\n[english text]\n---VIETNAMESE---\n[vietnamese text]
+      return cleanedContent;
+    } catch (error: any) {
+      this.logger.error(
+        `[analyzeForecastChart] Error analyzing forecast: ${error.message}`
+      );
+      // Don't throw - return null so forecast creation can still succeed
+      return null;
+    }
   }
 }
