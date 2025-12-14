@@ -1,0 +1,14 @@
+# Python dependencies for Forecast AI/ML feature
+# Install with: pip install -r requirements.txt
+
+# Core data processing
+numpy>=1.24.0,<2.0.0
+pandas>=2.0.0,<3.0.0
+
+# Machine Learning
+scikit-learn>=1.3.0,<2.0.0
+tensorflow>=2.13.0,<3.0.0
+
+# Visualization (for generating forecast charts)
+matplotlib>=3.7.0,<4.0.0
+

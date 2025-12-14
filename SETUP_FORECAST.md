@@ -173,7 +173,7 @@ call npx prisma db push
 echo Setting up Python environment...
 call python -m venv venv_tf
 call venv_tf\Scripts\activate.bat
-call pip install numpy pandas scikit-learn tensorflow matplotlib
+call pip install -r requirements.txt
 
 echo Setup complete!
 pause
@@ -194,7 +194,7 @@ npx prisma db push
 echo "Setting up Python environment..."
 python3 -m venv venv_tf
 source venv_tf/bin/activate
-pip install numpy pandas scikit-learn tensorflow matplotlib
+pip install -r requirements.txt
 
 echo "Setup complete!"
 ```
