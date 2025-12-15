@@ -1,20 +1,5 @@
-<<<<<<< Updated upstream
-import { Controller, Post, Body, HttpException, HttpStatus, UploadedFile, UseInterceptors, HttpCode, Query, Get, Req, UseGuards, Request } from '@nestjs/common';
-import { ApiBody, ApiConsumes, ApiOkResponse, ApiOperation, ApiTags, ApiQuery, ApiBearerAuth } from '@nestjs/swagger';
-import { FileInterceptor } from '@nestjs/platform-express';
-import { diskStorage } from 'multer';
-import { AiService } from '@modules/ai/ai.service';
-import { CleanCsvDto } from './dto/clean-csv.dto';
-import { CleanExcelUploadDto } from './dto/clean-excel.dto';
-import { ChatWithAiDto } from './dto/chat-with-ai.dto';
-import { AiCleanJobService } from './ai.clean.job';
-import { EvaluateChartDto } from './dto/evaluate-chart.dto';
-import { AiChartEvaluationService } from './ai.chart-evaluation.service';
-import { JwtAccessTokenGuard } from '@modules/auth/guards/jwt-access-token.guard';
-import { AuthRequest } from '@modules/auth/auth.controller';
-
-=======
 import {
+  Request,
   Controller,
   Post,
   Body,
@@ -26,6 +11,7 @@ import {
   Query,
   Get,
   Req,
+  UseGuards,
 } from "@nestjs/common";
 import {
   ApiBody,
@@ -49,7 +35,10 @@ import {
 import { AiCleanJobService } from "./ai.clean.job";
 import { PrismaService } from "../../prisma/prisma.service";
 import { DatasetsService } from "../datasets/datasets.service";
->>>>>>> Stashed changes
+import { AiChartEvaluationService } from "./ai.chart-evaluation.service";
+import { JwtAccessTokenGuard } from "@modules/auth/guards/jwt-access-token.guard";
+import { EvaluateChartDto } from "./dto/evaluate-chart.dto";
+import { AuthRequest } from "@modules/auth/auth.controller";
 
 @ApiTags("ai")
 @ApiBearerAuth()
@@ -58,16 +47,15 @@ export class AiController {
   constructor(
     private readonly aiService: AiService,
     private readonly aiCleanJobService: AiCleanJobService,
-<<<<<<< Updated upstream
     private readonly aiChartEvaluationService: AiChartEvaluationService,
-=======
     private readonly prismaService: PrismaService,
     private readonly datasetsService: DatasetsService
->>>>>>> Stashed changes
   ) {}
 
   @Post("chat-with-ai")
+  @UseGuards(JwtAccessTokenGuard)
   @ApiBody({ type: ChatWithAiDto })
+  @ApiOperation({ summary: 'Chat with AI assistant, auto-detect dataset requests' })
   async chatWithAi(@Body() body: ChatWithAiDto, @Req() req: any) {
     if (!body.message)
       throw new HttpException(
@@ -75,8 +63,8 @@ export class AiController {
         HttpStatus.BAD_REQUEST
       );
     try {
-      // Extract userId from auth
-      const userId = req.user?.id || req.user?.userId || body.userId;
+      // Extract userId from JWT token (guaranteed by JwtAccessTokenGuard)
+      const userId = req.user?.userId || req.user?.id;
 
       // Check if user is asking to create a chart
       const isChartRequest = this.isChartGenerationRequest(body.message);
@@ -93,30 +81,34 @@ export class AiController {
       if (isChartRequest && body.datasetId && userId) {
         // User wants to create chart AND has dataset -> Generate directly
         console.log("[DEBUG] Route: Generate chart directly");
-        return await this.handleChartGeneration(
+        const result = await this.handleChartGeneration(
           body.message,
           body.datasetId,
           userId
         );
+        return { code: 200, message: 'Success', data: result };
       } else if (isChartRequest && userId) {
         console.log("[DEBUG] Route: Auto-fetch datasets for chart creation");
         const datasets = await this.getUserDatasets(userId);
         console.log("[DEBUG] Found datasets:", datasets.length);
-        return await this.handleChartRequestWithoutDataset(body.message, datasets);
+        const result = await this.handleChartRequestWithoutDataset(body.message, datasets);
+        return { code: 200, message: 'Success', data: result };
       } else if (wantsDatasetList && userId) {
         console.log("[DEBUG] Route: Show dataset list");
         const datasets = await this.getUserDatasets(userId);
         console.log("[DEBUG] Found datasets:", datasets.length);
-        return await this.showDatasetList(datasets);
+        const result = await this.showDatasetList(datasets);
+        return { code: 200, message: 'Success', data: result };
       }
 
       // Regular chat
       console.log("[DEBUG] Route: Regular chat");
-      return await this.aiService.chatWithAi(
+      const result = await this.aiService.chatWithAi(
         body.message,
         body.messages,
         body.language
       );
+      return { code: 200, message: 'Success', data: result };
     } catch (e: any) {
       throw new HttpException(
         { success: false, message: e.message },
@@ -199,23 +191,39 @@ export class AiController {
     const lowerMsg = message.toLowerCase().trim();
 
     const listKeywords = [
+      // Vietnamese dataset keywords
       "dataset đâu",
       "dataset nào",
       "có dataset",
       "dataset gì",
-      "có",
-      "được",
-      "list",
-      "danh sách",
+      "danh sách dataset",
       "xem dataset",
-      "show dataset",
       "hiển thị dataset",
-      "dataset nào",
       "có những dataset",
       "các dataset",
+      "dữ liệu nào",
+      "xem dữ liệu",
+      "có dữ liệu",
+      "danh sách dữ liệu",
+      "list",
+      "danh sách",
+      "show dataset",
+      "list dataset",
+      "my dataset",
+      "available dataset",
+      "show data",
+      "list data",
+      "my data",
+      "what dataset",
+      "which dataset",
+      
+      // Simple confirmations (when AI asks to show list)
       "yes",
       "ok",
       "okay",
+      "có",
+      "được",
+      "list",
     ];
 
     return listKeywords.some((keyword) => lowerMsg.includes(keyword));
@@ -318,6 +326,21 @@ export class AiController {
         datasetId: datasetId,
         headers,
       });
+
+      // Create chart in database with AI-generated config
+      const createdChart = await this.prismaService.prisma.chart.create({
+        data: {
+          userId,
+          datasetId,
+          name: result.suggestedName,
+          description: `AI-generated ${result.type} chart`,
+          type: result.type,
+          config: result.config,
+        },
+      });
+
+      // Return chart URL for edit mode
+      const chartUrl = `/chart-editor?chartId=${createdChart.id}`;
 
       return {
         reply: `✅ **Đã tạo biểu đồ thành công!**\n\n📊 **${result.suggestedName}**\n\n${result.explanation}\n\n🔗 [**Mở Chart Editor →**](${result.chartUrl})\n\n💡 Click vào link trên để xem và chỉnh sửa biểu đồ!`,
@@ -624,7 +647,6 @@ export class AiController {
     return { code: 200, message: "Success", data: ids };
   }
 
-<<<<<<< Updated upstream
   @Post('evaluate-chart')
   @UseGuards(JwtAccessTokenGuard)
   @HttpCode(HttpStatus.OK)
@@ -672,14 +694,14 @@ export class AiController {
         completedChunks: { type: 'number' }
       } 
     } 
-=======
+  })
+
   @Get("clean-progress")
   @ApiOperation({ summary: "Get current cleaning progress for a jobId" })
   @ApiQuery({
     name: "jobId",
     required: true,
     description: "Job ID to check progress",
->>>>>>> Stashed changes
   })
   @ApiOkResponse({
     description: "Current progress",
