@@ -7,6 +7,7 @@ import { CleanCsvDto } from './dto/clean-csv.dto';
 import { parse } from 'fast-csv';
 import { Readable } from 'stream';
 import { PythonShell } from 'python-shell';
+import { CHART_CONFIG_JSON_SCHEMA } from './dto/generate-chart-config.dto';
 
 @Injectable()
 export class AiService {
@@ -77,7 +78,7 @@ RESPONSE FORMAT RULES:
 2. **Structure your answers clearly**:
    - Start with a brief summary (1-2 sentences)
    - Follow with detailed steps or explanation
-   - End with a helpful tip or next action (if relevant)
+   - End with a helpful tip or next action (if rnt)
 
 3. **Reference UI elements that users can SEE**:
    - Use visible labels: "New Chart button", "Dataset selector", "Chart Type dropdown"
@@ -814,9 +815,362 @@ IMPORTANT: Speak naturally about UI elements users can see. DON'T expose technic
 
     return { data: cleaned.data, rowCount: cleaned.rowCount, columnCount: cleaned.columnCount };
   }
+   async generateChartConfig(input: {
+    prompt: string;
+    datasetId: string;
+    headers: Array<{ id: string; name: string; type: string }>;
+    chartType?: string;
+  }) {
+    const { prompt, headers, chartType } = input;
 
-  /** ========================= FORECAST ========================= */
-  async forecast(options?: {
+    if (!this.apiKey) {
+      throw new InternalServerErrorException("AI service is not configured");
+    }
+
+    if (!headers || headers.length === 0) {
+      throw new BadRequestException("Dataset headers are required");
+    }
+
+    this.logger.log(
+      `[generateChartConfig] Generating config for prompt: "${prompt}"${chartType ? ` with enforced type: ${chartType}` : ''}`
+    );
+    this.logger.log(
+      `[generateChartConfig] Available headers: ${JSON.stringify(headers)}`
+    );
+
+    // Build system prompt with chart configuration knowledge
+    const systemPrompt = `You are an expert data visualization assistant specializing in creating chart configurations.
+
+**Available Dataset Headers:**
+${headers.map((h, idx) => `${idx + 1}. "${h.name}" (id: ${h.id}, type: ${h.type})`).join("\n")}
+
+**STRICT CHART VALIDATION RULES (Frontend Compatibility):**
+You must ONLY select columns that match these data types for each axis. IF A REQUESTED CHART TYPE DOES NOT HAVE VALID COLUMNS, SELECT A DIFFERENT VALID CHART TYPE OR RETURN AN ERROR EXPLANATION.
+
+- **Line Chart (line)**:
+  - X-Axis: text, date, number
+  - Y-Axis: number ONLY
+
+- **Bar Chart (bar)**:
+  - X-Axis: text, date, number
+  - Y-Axis: number, date
+
+- **Area Chart (area)**:
+  - X-Axis: text, date, number
+  - Y-Axis: number ONLY
+
+- **Scatter Chart (scatter)**:
+  - X-Axis: number ONLY
+  - Y-Axis: number ONLY
+
+- **Cycle Plot (cycleplot)**:
+  - X-Axis (Period): text, number, date
+  - Y-Axis (Value): number ONLY
+
+- **Pie/Donut (pie, donut)**:
+  - Label Key: text, date
+  - Value Key: number ONLY
+
+- **Heatmap (heatmap)**:
+  - XAxis & YAxis: text, date, number
+  - Value Key: number ONLY
+
+- **Histogram (histogram)**:
+  - Data Column: number ONLY
+
+${chartType && chartType !== 'auto' ? `**CRITICAL INSTRUCTION**: The user has EXPLICITLY requested a "${chartType}" chart. You MUST generate a configuration for "${chartType}" IF compatible columns exist. If not, explain why.` : ''}
+${chartType === 'auto' ? `**CRITICAL INSTRUCTION**: The user has requested AUTO selection. You MUST analyze the dataset headers and prompt to select the single BEST chart type from the supported list that COMPLIES with the validation rules above.` : ''}
+
+**CRITICAL: Full Config Structure with BOTH Root AND Nested Properties**
+
+**IMPORTANT NAMING RULES:**
+1. **Axis Keys**: ALWAYS use the exact **Header ID** for xAxisKey, yAxisKeys, labelKey, valueKey, etc.
+2. **Axis Labels**: ALWAYS use the exact **Header Name** for xAxisLabel, yAxisLabel. Do NOT invent new labels.
+3. **Series Names**: ALWAYS use the exact **Header Name** for series name.
+
+ALL chart types must have BOTH:
+1. Properties at ROOT level (chartType, width, height, xAxisKey, yAxisKeys, etc.)
+2. Nested "config" object (duplicate + additional settings)
+3. Nested "formatters" object (optional)
+4. Nested "axisConfigs" object (for axis keys and series)
+
+**FOR LINE, BAR, AREA, SCATTER - DUAL Structure:**
+{
+  "chartType": "line",
+  "width": 800,
+  "height": 500,
+  "title": "Chart Title",
+  "xAxisKey": "column_id",      // ← At root (can be empty string)
+  "yAxisKeys": ["value_id"],    // ← At root (can be empty array)
+  "theme": "dark",
+  "showLegend": true,
+  "showGrid": true,
+  "showTooltip": true,
+  "margin": { "top": 50, "left": 80, "right": 50, "bottom": 80 },
+  "xAxisLabel": "Dataset Header Name X",  // ← USE EXACT HEADER NAME
+  "yAxisLabel": "Dataset Header Name Y",  // ← USE EXACT HEADER NAME
+  "config": {                   // ← NESTED config with ALL settings
+    "title": "Chart Title",
+    "width": 800,
+    "height": 500,
+    "margin": { "top": 50, "left": 80, "right": 50, "bottom": 80 },
+    "theme": "dark",
+    "backgroundColor": "#000000ff",
+    "showLegend": true,
+    "showGrid": true,
+    "showTooltip": true,
+    "animationDuration": 400,
+    "gridOpacity": 0.2,
+    "legendPosition": "top",
+    "xAxisStart": "auto",
+    "yAxisStart": "auto",
+    "xAxisRotation": 0,
+    "yAxisRotation": 0,
+    "showAxisLabels": true,
+    "showAxisTicks": true,
+    "enableZoom": false,
+    "enablePan": false,
+    "zoomExtent": 100,
+    "titleFontSize": 18,
+    "labelFontSize": 12,
+    "legendFontSize": 12,
+    // Line-specific
+    "curve": "curveLinear",
+    "lineWidth": 2,
+    "showPoints": false,
+    "pointRadius": 2,
+    "showPointValues": false,
+    "disabledLines": [],
+    // Bar-specific
+    "barType": "grouped",
+    "barWidth": 20,
+    "barSpacing": 1,
+    "disabledBars": [],
+    "showPoints": false,
+    "showPointValues": false
+  },
+  "formatters": {               // ← NESTED formatters
+    "useXFormatter": false,
+    "useYFormatter": false,
+    "xFormatterType": "number",
+    "yFormatterType": "number",
+    "xDecimalPlaces": 2,
+    "yDecimalPlaces": 2
+  },
+  "axisConfigs": {              // ← NESTED axis config
+    "xAxisKey": "Dataset Header ID X",    // ← REAL axis key here
+    "xAxisLabel": "Dataset Header Name X", // ← USE EXACT HEADER NAME
+    "xAxisStart": "auto",
+    "yAxisLabel": "Dataset Header Name Y", // ← USE EXACT HEADER NAME
+    "yAxisStart": "auto",
+    "seriesConfigs": [{          // ← Series configs here
+      "id": "series_1",
+      "name": "Dataset Header Name",     // ← USE EXACT HEADER NAME
+      "dataColumn": "Dataset Header ID Y",
+      "color": "#4c84ff",
+      "visible": true
+    }],
+    "showAxisLabels": true,
+    "showAxisTicks": true,
+    "xAxisRotation": 0,
+    "yAxisRotation": 0
+  }
+}
+
+**FOR PIE, DONUT - Nested Structure:**
+{
+  "chartType": "pie",
+  "config": {
+    "title": "Pie Chart",
+    "width": 600,
+    "height": 600,
+    "margin": { "top": 50, "left": 50, "right": 50, "bottom": 50 },
+    "labelKey": "category_column_id", // Text/Date
+    "valueKey": "value_column_id",    // Number ONLY
+    "showLegend": true,
+    "showLabels": true,
+    "showPercentage": true,
+    "theme": "dark",
+    "backgroundColor": "#000000ff",
+    "legendPosition": "bottom"
+  },
+  "formatters": {
+    "useValueFormatter": false,
+    "valueFormatterType": "number"
+  }
+}
+
+**FOR HEATMAP - Nested Structure:**
+{
+  "chartType": "heatmap",
+  "config": {
+    "title": "Heatmap",
+    "width": 800,
+    "height": 500,
+    "margin": { "top": 50, "left": 80, "right": 50, "bottom": 80 },
+    "showLegend": true,
+    "showGrid": true,
+    "showTooltip": true,
+    "theme": "dark",
+    "backgroundColor": "#000000ff",
+    "colorScheme": "viridis",
+    "showValues": true,
+    "cellBorderWidth": 1,
+    "cellBorderColor": "#ffffff"
+  },
+  "axisConfigs": {
+    "xAxisKey": "x_column_id",
+    "yAxisKey": "y_column_id",
+    "valueKey": "value_column_id", // Number ONLY
+    "xAxisLabel": "Dataset Header Name X",
+    "yAxisLabel": "Dataset Header Name Y"
+  },
+  "formatters": {
+    "useValueFormatter": false,
+    "valueFormatterType": "number"
+  }
+}
+
+**FOR CYCLEPLOT - Nested Structure:**
+{
+  "chartType": "cycleplot",
+  "config": {
+    "title": "Cycle Plot",
+    "width": 800,
+    "height": 500,
+    "margin": { "top": 50, "left": 80, "right": 50, "bottom": 80 },
+    "showLegend": true,
+    "showGrid": true,
+    "showTooltip": true,
+    "theme": "dark",
+    "backgroundColor": "#000000ff",
+    "showPoints": false,
+    "lineWidth": 2,
+    "pointRadius": 2,
+    "curve": "curveLinear"
+  },
+  "axisConfigs": {
+    "cycleKey": "cycle_column_id",   // ID of column (text/number/date) representing the Cycle (e.g. Year)
+    "periodKey": "period_column_id", // ID of column (text/number/date) representing the Period (e.g. Month)
+    "valueKey": "value_column_id",   // ID of column (number ONLY)
+    "xAxisLabel": "Dataset Header Name (Period)",
+    "yAxisLabel": "Dataset Header Name (Value)"
+  },
+  "formatters": {
+    "useYFormatter": false,
+    "yFormatterType": "number"
+  }
+}
+
+**FOR HISTOGRAM - Nested Structure:**
+{
+  "chartType": "histogram",
+  "config": {
+    "title": "Distribution",
+    "width": 800,
+    "height": 500,
+    "margin": { "top": 50, "left": 80, "right": 50, "bottom": 80 },
+    "showLegend": false,
+    "showGrid": true,
+    "showTooltip": true,
+    "theme": "light",
+    "backgroundColor": "#ffffff",
+    "binCount": 10,
+    "binMethod": "sturges",
+    "showDensity": false
+  },
+  "axisConfigs": {
+    "seriesConfigs": [{
+      "id": "series1",
+      "name": "Dataset Header Name",
+      "dataColumn": "column_id", // Number ONLY
+      "color": "#4c84ff",
+      "visible": true
+    }],
+    "xAxisLabel": "Dataset Header Name",
+    "yAxisLabel": "Frequency"
+  }
+}
+
+**Important Rules:**
+- ALWAYS use column IDs from dataset headers for keys.
+- ALWAYS use column NAMES from dataset headers for labels (xAxisLabel, yAxisLabel, series name).
+- For line/bar/area/scatter: Include BOTH root properties AND nested config/formatters/axisConfigs.
+- Set xAxisKey and yAxisKeys at root as EMPTY ("" and []) - real values go in axisConfigs.
+- Choose appropriate numeric columns for values.
+- Vietnamese prompt → Vietnamese suggestedName and explanation.`;
+
+    const userPrompt = `User request: "${prompt}"
+
+Generate a chart configuration that best matches this request.`;
+
+    try {
+      const res = await fetch(`${this.baseUrl}/chat/completions`, {
+        method: "POST",
+        headers: this.getCommonHeaders(this.apiKey),
+        body: JSON.stringify({
+          model: this.model,
+          messages: [
+            { role: "system", content: systemPrompt },
+            { role: "user", content: userPrompt },
+          ],
+          temperature: 0.3,
+          response_format: { type: "json_object" },  // Allow flexible JSON structure
+        }),
+      });
+
+      if (!res.ok) {
+        const text = await res.text().catch(() => "");
+        this.logger.error(
+          `OpenRouter API error: ${res.status} ${res.statusText} ${text}`
+        );
+        throw new InternalServerErrorException(
+          "Failed to generate chart config from AI"
+        );
+      }
+
+      const data = await res.json();
+      const content = data?.choices?.[0]?.message?.content;
+
+      if (!content) {
+        throw new InternalServerErrorException("AI returned empty response");
+      }
+
+      const parsed = JSON.parse(content);
+
+      this.logger.log(`[generateChartConfig] Generated config successfully`);
+      this.logger.debug(
+        `[generateChartConfig] Full config: ${JSON.stringify(parsed)}`
+      );
+
+      // Generate chart URL with config
+      const configBase64 = Buffer.from(
+        JSON.stringify({
+          type: parsed.chartType || parsed.type,
+          config: parsed,  // Full config with chartType, config, formatters, axisConfigs
+          name: parsed.suggestedName,
+          datasetId: input.datasetId,
+        })
+      ).toString("base64url");
+
+      const chartUrl = `/chart-editor?datasetId=${input.datasetId}`;
+
+      return {
+        type: parsed.chartType || parsed.type,
+        config: parsed,  // Return full chart config
+        explanation: parsed.explanation,
+        suggestedName: parsed.suggestedName,
+        chartUrl: chartUrl,
+        success: true,
+      };
+    } catch (error) {
+      this.logger.error(`[generateChartConfig] Error: ${error.message}`);
+      throw new InternalServerErrorException(
+        `Failed to generate chart config: ${error.message}`
+      );
+    }
+  }
+    async forecast(options?: {
     csvData?: string;
     targetColumn?: string;
     featureColumns?: string[];
@@ -835,8 +1189,6 @@ IMPORTANT: Speak naturally about UI elements users can see. DON'T expose technic
 
     this.logger.log('[forecast] Running in PRODUCTION MODE with real dataset');
 
-    // Resolve script path - works in both dev (src/) and production (dist/)
-    // __dirname in compiled JS will be dist/modules/ai, so we go up to find src
     const isProduction = __dirname.includes('dist');
     const baseDir = isProduction
       ? path.join(__dirname, '..', '..', '..', 'src', 'modules', 'ai')
@@ -849,10 +1201,6 @@ IMPORTANT: Speak naturally about UI elements users can see. DON'T expose technic
       throw new InternalServerErrorException('Forecast script not found');
     }
 
-    // Prepare Python script options
-    // Use virtual environment Python with TensorFlow 2.16.1
-    // Derive project root from script path: scriptPath is at src/modules/ai/ai-model/AI_Training.py
-    // So we go up 4 levels from scriptPath to get to project root (ai-model -> ai -> modules -> src -> BE_WEB)
     const scriptDir = path.dirname(scriptPath);
     const projectRoot = path.resolve(scriptDir, '..', '..', '..', '..');
     const venvPythonPath = path.resolve(projectRoot, 'venv_tf', 'Scripts', 'python.exe');
@@ -1096,3 +1444,4 @@ IMPORTANT: Speak naturally about UI elements users can see. DON'T expose technic
     });
   }
 }
+

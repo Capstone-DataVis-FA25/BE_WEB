@@ -6,8 +6,8 @@ import { AiChartEvaluationService } from './ai.chart-evaluation.service';
 import { NotificationModule } from '../notification/notification.module';
 import { PrismaModule } from '../../prisma/prisma.module';
 import { KmsModule } from '@modules/kms/kms.module';
-import { ForecastsModule } from '../forecasts/forecasts.module';
-import { DatasetsModule } from '../datasets/datasets.module';
+import { DatasetsModule } from '@modules/datasets/datasets.module';
+import { ForecastsModule } from '@modules/forecasts/forecasts.module';
 
 @Module({
   imports: [
