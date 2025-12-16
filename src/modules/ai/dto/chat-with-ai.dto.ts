@@ -36,6 +36,14 @@ export class ChatWithAiDto {
   datasetId?: string;
 
   @ApiPropertyOptional({
+    description: "Specific chart type requested (e.g. 'line', 'bar') or 'auto'",
+    example: "bar",
+  })
+  @IsOptional()
+  @IsString()
+  chartType?: string;
+
+  @ApiPropertyOptional({
     description: "User ID for fetching user datasets (auto-filled from auth)",
     example: "user-uuid",
   })

@@ -126,6 +126,18 @@ export class DatasetsService {
           createdAt: true,
           updatedAt: true,
           userId: true,
+          // Include only header names (not data) for performance
+          headers: {
+            select: {
+              name: true,
+              type: true,
+              index: true,
+              dateFormat: true,
+            },
+            orderBy: {
+              index: "asc",
+            },
+          },
         },
         orderBy: { createdAt: "desc" },
       });
@@ -284,6 +296,12 @@ export class DatasetsService {
       // First validate ownership
       await this.validateOwnership(id, userId);
 
+      // Delete all forecasts associated with this dataset
+      await this.prismaService.prisma.forecast.deleteMany({
+        where: { datasetId: id },
+      });
+
+      // Delete the dataset (this will cascade delete related DataHeaders and ChartHistory)
       await this.prismaService.prisma.dataset.delete({
         where: { id },
       });

@@ -10,6 +10,3 @@ export * from './clean-csv.dto';
 export * from './clean-excel.dto';
 export * from './evaluate-chart.dto';
 export * from './generate-chart-config.dto';
-export * from './predictive-analysis.dto';
-export * from './web-analysis.dto';
-export * from './web-scraping.dto';

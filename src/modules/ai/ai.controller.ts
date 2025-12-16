@@ -12,6 +12,7 @@ import {
   Get,
   Req,
   UseGuards,
+  Param,
 } from "@nestjs/common";
 import {
   ApiBody,
@@ -39,6 +40,9 @@ import { AiChartEvaluationService } from "./ai.chart-evaluation.service";
 import { JwtAccessTokenGuard } from "@modules/auth/guards/jwt-access-token.guard";
 import { EvaluateChartDto } from "./dto/evaluate-chart.dto";
 import { AuthRequest } from "@modules/auth/auth.controller";
+import { ForecastProcessingService } from "@modules/forecasts/forecast-processing.service";
+import { ForecastCreationJobService } from "@modules/forecasts/forecast-creation.job";
+import { ForecastDto } from "./dto/forecast.dto";
 
 @ApiTags("ai")
 @ApiBearerAuth()
@@ -49,8 +53,10 @@ export class AiController {
     private readonly aiCleanJobService: AiCleanJobService,
     private readonly aiChartEvaluationService: AiChartEvaluationService,
     private readonly prismaService: PrismaService,
-    private readonly datasetsService: DatasetsService
-  ) {}
+    private readonly datasetsService: DatasetsService,
+    private readonly forecastProcessingService: ForecastProcessingService,
+    private readonly forecastCreationJobService: ForecastCreationJobService,
+  ) { }
 
   @Post("chat-with-ai")
   @UseGuards(JwtAccessTokenGuard)
@@ -79,26 +85,41 @@ export class AiController {
       console.log("[DEBUG] UserId:", userId);
 
       if (isChartRequest && body.datasetId && userId) {
-        // User wants to create chart AND has dataset -> Generate directly
-        console.log("[DEBUG] Route: Generate chart directly");
+        // User wants to create chart AND has dataset
+        
+        // NEW: Check if chartType is already selected
+        if (!body.chartType) {
+          console.log("[DEBUG] Route: Ask for chart type preference");
+          return {
+            reply: "Bạn muốn tôi tự động chọn loại biểu đồ phù hợp hay bạn muốn tự chọn loại biểu đồ cụ thể?",
+            success: true,
+            needsChartTypeSelection: true, // Trigger UI for chart type selection
+            datasetId: body.datasetId, // Keep dataset context
+            originalMessage: body.message // Keep original prompt context
+          };
+        }
+
+        // Generate directly with specific or auto chart type
+        console.log("[DEBUG] Route: Generate chart directly with type:", body.chartType);
         const result = await this.handleChartGeneration(
           body.message,
           body.datasetId,
-          userId
+          userId,
+          body.chartType
         );
-        return { code: 200, message: 'Success', data: result };
+        return result;
       } else if (isChartRequest && userId) {
         console.log("[DEBUG] Route: Auto-fetch datasets for chart creation");
         const datasets = await this.getUserDatasets(userId);
         console.log("[DEBUG] Found datasets:", datasets.length);
         const result = await this.handleChartRequestWithoutDataset(body.message, datasets);
-        return { code: 200, message: 'Success', data: result };
+        return result;
       } else if (wantsDatasetList && userId) {
         console.log("[DEBUG] Route: Show dataset list");
         const datasets = await this.getUserDatasets(userId);
         console.log("[DEBUG] Found datasets:", datasets.length);
         const result = await this.showDatasetList(datasets);
-        return { code: 200, message: 'Success', data: result };
+        return result;
       }
 
       // Regular chat
@@ -108,7 +129,8 @@ export class AiController {
         body.messages,
         body.language
       );
-      return { code: 200, message: 'Success', data: result };
+      return result;
+      return await this.aiService.chatWithAi(body.message, body.messages, body.language);
     } catch (e: any) {
       throw new HttpException(
         { success: false, message: e.message },
@@ -236,7 +258,7 @@ export class AiController {
 
   private async askForDatasetList() {
     return {
-      reply: `📊 **Tạo biểu đồ từ dữ liệu**\n\n🤔 Tôi hiểu bạn muốn xem danh sách các dataset hiện có để lựa chọn.\n\n**Để xem và quản lý các dataset của bạn:**\n\n1️⃣ **Truy cập Dataset Management**\n   • Click vào mục "Data" hoặc "Datasets" trên thanh điều hướng\n   • Hoặc tìm menu "Manage Datasets"\n\n2️⃣ **Xem danh sách**\n   • Bảng sẽ hiển thị tất cả dataset bạn đã tải lên\n   • Thông tin: Tên, Số rows, Ngày tạo/cập nhật\n\n💡 **Mẹo:** Nếu chưa có dataset, click "Upload New Dataset" để thêm dữ liệu mới!\n\n---\n\n**Bạn có muốn tôi hiển thị danh sách dataset ngay đây không?**\n\n👉 Trả lời "Có" hoặc "List" để xem danh sách`,
+      reply: `**Tạo biểu đồ từ dữ liệu**\n\n🤔 Tôi hiểu bạn muốn xem danh sách các dataset hiện có để lựa chọn.\n\n**Để xem và quản lý các dataset của bạn:**\n\n1️⃣ **Truy cập Dataset Management**\n   • Click vào mục "Data" hoặc "Datasets" trên thanh điều hướng\n   • Hoặc tìm menu "Manage Datasets"\n\n2️⃣ **Xem danh sách**\n   • Bảng sẽ hiển thị tất cả dataset bạn đã tải lên\n   • Thông tin: Tên, Số rows, Ngày tạo/cập nhật\n\n💡 **Mẹo:** Nếu chưa có dataset, click "Upload New Dataset" để thêm dữ liệu mới!\n\n---\n\n**Bạn có muốn tôi hiển thị danh sách dataset ngay đây không?**\n\n👉 Trả lời "Có" hoặc "List" để xem danh sách`,
       success: true,
       needsUserConfirmation: true,
       action: "list_datasets",
@@ -255,7 +277,7 @@ export class AiController {
     }
 
     return {
-      reply: `📊 **Danh sách Dataset của bạn**\n\nBạn có ${datasets.length} dataset${datasets.length > 1 ? "s" : ""}:\n\n${datasets.map((d, i) => `${i + 1}. **${d.name}**${d.description ? ` - ${d.description}` : ""}\n   📈 ${d.rowCount} rows × ${d.columnCount} columns\n   🆔 ID: ${d.id}\n   📅 Cập nhật: ${new Date(d.updatedAt).toLocaleDateString("vi-VN")}`).join("\n\n")}\n\n---\n\n💡 **Cách tạo biểu đồ:**\n\nSau khi chọn dataset, hãy mô tả biểu đồ bạn muốn tạo, ví dụ:\n• "Tạo biểu đồ line chart hiển thị doanh thu theo tháng"\n• "Vẽ bar chart so sánh số lượng sản phẩm"\n\n👉 Khi bạn sẵn sàng, hãy chọn dataset và mô tả biểu đồ bạn muốn!`,
+      reply: `**Danh sách Dataset của bạn**\n\nBạn có ${datasets.length} dataset${datasets.length > 1 ? "s" : ""} \n\nKhi bạn sẵn sàng, hãy chọn dataset và mô tả biểu đồ bạn muốn!`,
       success: true,
       needsDatasetSelection: true,
       datasets: datasets,
@@ -277,7 +299,7 @@ export class AiController {
     }
 
     return {
-      reply: `📊 **Chọn dataset để tạo biểu đồ**\n\nBạn có ${datasets.length} dataset${datasets.length > 1 ? "s" : ""}:\n\n${datasets.map((d, i) => `${i + 1}. **${d.name}**${d.description ? ` - ${d.description}` : ""}\n   📈 ${d.rowCount} rows × ${d.columnCount} columns`).join("\n\n")}\n\n💡 Vui lòng chọn dataset từ danh sách trên, sau đó mô tả chi tiết hơn về biểu đồ bạn muốn tạo!`,
+      reply: `📊 **Chọn dataset để tạo biểu đồ**\n\nBạn có ${datasets.length} dataset${datasets.length > 1 ? "s" : ""}:\n\n Vui lòng chọn dataset từ danh sách trên, sau đó mô tả chi tiết hơn về biểu đồ bạn muốn tạo!`,
       success: true,
       needsDatasetSelection: true,
       datasets: datasets,
@@ -287,7 +309,8 @@ export class AiController {
   private async handleChartGeneration(
     message: string,
     datasetId: string,
-    userId: string
+    userId: string,
+    chartType?: string
   ) {
     try {
       // Fetch dataset with headers
@@ -325,6 +348,7 @@ export class AiController {
         prompt: message,
         datasetId: datasetId,
         headers,
+        chartType: chartType !== 'auto' ? chartType : undefined,
       });
 
       // Create chart in database with AI-generated config
@@ -332,21 +356,24 @@ export class AiController {
         data: {
           userId,
           datasetId,
-          name: result.suggestedName,
+          name: result.suggestedName || result.config.title || "AI Generated Chart",
           description: `AI-generated ${result.type} chart`,
           type: result.type,
           config: result.config,
         },
       });
 
-      // Return chart URL for edit mode
+      // Return chart URL for edit mode with full URL
       const chartUrl = `/chart-editor?chartId=${createdChart.id}`;
 
       return {
-        reply: `✅ **Đã tạo biểu đồ thành công!**\n\n📊 **${result.suggestedName}**\n\n${result.explanation}\n\n🔗 [**Mở Chart Editor →**](${result.chartUrl})\n\n💡 Click vào link trên để xem và chỉnh sửa biểu đồ!`,
+        reply: `Đã tạo biểu đồ thành công ✅\n\n **${result.config.title}**\n\n🔗 [**Mở Chart Editor →**](${chartUrl})\n\n Bấm vào link trên để xem và chỉnh sửa biểu đồ!`,
         success: true,
         chartGenerated: true,
-        chartData: result,
+        chartData: {
+          ...result,
+          chartUrl: chartUrl, 
+        },
       };
     } catch (error: any) {
       return {
@@ -393,23 +420,23 @@ export class AiController {
   @ApiConsumes("multipart/form-data")
   @ApiBody({ type: CleanExcelUploadDto })
   @ApiOkResponse({
-    description: "2D JSON array of cleaned data",
+    description: '2D JSON array of cleaned data',
     schema: {
-      type: "object",
+      type: 'object',
       properties: {
         data: {
-          type: "array",
+          type: 'array',
           items: {
-            type: "array",
+            type: 'array',
             items: {
-              oneOf: [{ type: "string" }, { type: "number" }, { type: "null" }],
-            },
-          },
+              oneOf: [{ type: 'string' }, { type: 'number' }, { type: 'null' }]
+            }
+          }
         },
-        rowCount: { type: "number" },
-        columnCount: { type: "number" },
-      },
-    },
+        rowCount: { type: 'number' },
+        columnCount: { type: 'number' }
+      }
+    }
   })
   @UseInterceptors(
     FileInterceptor("file", {
@@ -650,12 +677,12 @@ export class AiController {
   @Post('evaluate-chart')
   @UseGuards(JwtAccessTokenGuard)
   @HttpCode(HttpStatus.OK)
-  @ApiOperation({ 
+  @ApiOperation({
     summary: 'Evaluate a chart using AI based on its image and dataset',
     description: 'Send chart image (base64) and chart ID to get AI-powered evaluation and recommendations'
   })
   @ApiBody({ type: EvaluateChartDto })
-  @ApiOkResponse({ 
+  @ApiOkResponse({
     description: 'Chart evaluation completed successfully',
     schema: {
       type: 'object',
@@ -674,7 +701,7 @@ export class AiController {
       return result;
     } catch (e: any) {
       throw new HttpException(
-        { success: false, message: e.message }, 
+        { success: false, message: e.message },
         e.status || HttpStatus.INTERNAL_SERVER_ERROR
       );
     }
@@ -682,18 +709,18 @@ export class AiController {
   @Get('clean-progress')
   @ApiOperation({ summary: 'Get current cleaning progress for a jobId' })
   @ApiQuery({ name: 'jobId', required: true, description: 'Job ID to check progress' })
-  @ApiOkResponse({ 
-    description: 'Current progress', 
-    schema: { 
-      type: 'object', 
-      properties: { 
+  @ApiOkResponse({
+    description: 'Current progress',
+    schema: {
+      type: 'object',
+      properties: {
         jobId: { type: 'string' },
         status: { type: 'string' },
         progress: { type: 'number' },
         totalChunks: { type: 'number' },
         completedChunks: { type: 'number' }
-      } 
-    } 
+      }
+    }
   })
 
   @Get("clean-progress")
@@ -794,4 +821,68 @@ export class AiController {
       );
     }
   }
+   @Post('forecast')
+  @UseGuards(JwtAccessTokenGuard)
+  @HttpCode(HttpStatus.OK)
+  @ApiOperation({
+    summary: 'Generate time series forecast (async)',
+    description: 'Starts an async job to generate time series forecasts. Returns jobId immediately. You will be notified when the forecast is complete.'
+  })
+  @ApiBody({ type: ForecastDto })
+  @ApiOkResponse({
+    description: 'Forecast job started',
+    schema: {
+      type: 'object',
+      properties: {
+        success: { type: 'boolean' },
+        jobId: { type: 'string' },
+        message: { type: 'string' }
+      }
+    }
+  })
+  async forecast(@Body() dto: ForecastDto, @Request() req: AuthRequest) {
+    try {
+      const userId = req.user.userId || req.user.sub;
+
+      // Create async job and return jobId immediately
+      const jobId = this.forecastCreationJobService.createJob(userId, dto);
+
+      return {
+        success: true,
+        jobId,
+        message: 'Forecast job started. You will be notified when it completes.',
+      };
+    } catch (e: any) {
+      if (e instanceof HttpException) {
+        throw e;
+      }
+      throw new HttpException(
+        e.message || 'Failed to start forecast job',
+        e.status || HttpStatus.INTERNAL_SERVER_ERROR
+      );
+    }
+  }
+
+  @Get('forecast/:jobId/status')
+  @UseGuards(JwtAccessTokenGuard)
+  @ApiOperation({ summary: 'Get forecast creation job status' })
+  getForecastJobStatus(@Param('jobId') jobId: string, @Request() req: AuthRequest) {
+    const status = this.forecastCreationJobService.getJobStatus(jobId);
+    if (!status) {
+      throw new HttpException('Job not found', HttpStatus.NOT_FOUND);
+    }
+    return status;
+  }
+
+  @Get('forecast/:jobId/result')
+  @UseGuards(JwtAccessTokenGuard)
+  @ApiOperation({ summary: 'Get forecast creation job result' })
+  getForecastJobResult(@Param('jobId') jobId: string, @Request() req: AuthRequest) {
+    const result = this.forecastCreationJobService.getJobResult(jobId);
+    if (!result) {
+      throw new HttpException('Job not found or not completed', HttpStatus.NOT_FOUND);
+    }
+    return result;
+  }
 }
+ 
