@@ -1,5 +1,6 @@
 import { Module } from "@nestjs/common";
 import { ConfigModule, ConfigService } from "@nestjs/config";
+import { ScheduleModule } from "@nestjs/schedule";
 import * as Joi from "joi";
 import { AppController } from "./app.controller";
 import { AppService } from "./app.service";
@@ -28,6 +29,7 @@ import { ForecastsModule } from "@modules/forecasts/forecasts.module";
 
 @Module({
   imports: [
+    ScheduleModule.forRoot(),
     ConfigModule.forRoot({
       validationSchema: Joi.object({
         NODE_ENV: Joi.string()
