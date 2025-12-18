@@ -35,4 +35,13 @@ export class EvaluateChartDto {
   @IsOptional()
   @IsString()
   language?: string;
+
+  @ApiPropertyOptional({
+    description: 'Selected column names used in the chart',
+    example: ['Platform', 'Revenue']
+  })
+  @IsOptional()
+  @IsArray()
+  @IsString({ each: true })
+  selectedColumns?: string[];
 }

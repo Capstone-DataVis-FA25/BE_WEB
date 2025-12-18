@@ -33,6 +33,8 @@ const CHART_TYPES = [
   "gauge",
   "funnel",
   "waterfall",
+  "cycleplot",
+  "histogram"
 ] as const;
 
 type ChartType = (typeof CHART_TYPES)[number];

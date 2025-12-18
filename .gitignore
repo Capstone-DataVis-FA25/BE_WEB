@@ -54,3 +54,32 @@ pids
 
 # Diagnostic reports (https://nodejs.org/api/report.html)
 report.[0-9]*.[0-9]*.[0-9]*.[0-9]*.json
+
+# Python virtual environments
+venv_tf/
+venv/
+env/
+ENV/
+.venv/
+
+# Python generated files
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.Python
+
+# AI Model generated files
+src/modules/ai/ai-model/*.png
+src/modules/ai/ai-model/*.jpg
+src/modules/ai/ai-model/*.jpeg
+src/modules/ai/ai-model/forecast_plot.png
+src/modules/ai/ai-model/model_diagnosis_*.png
+src/modules/ai/ai-model/training_predictions.png
+
+# Test data (optional - uncomment if you don't want to commit test data)
+# src/modules/ai/ai-model/test-data.csv
+# src/modules/ai/ai-model/test_data.csv
+
+# Prisma
+prisma/migrations/

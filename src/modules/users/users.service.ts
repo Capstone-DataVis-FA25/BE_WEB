@@ -267,7 +267,7 @@ export class UsersService {
     ]);
 
     // Get AI requests count directly from User model
-    const aiRequestsCount = user.aiRequestsCount || 0;
+    const aiRequestsCount =  0;
 
     // Get limits from subscription plan
     const limits = user.subscriptionPlan?.limits as any || {};
