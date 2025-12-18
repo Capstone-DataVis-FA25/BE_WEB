@@ -86,7 +86,7 @@ export class AiController {
 
       if (isChartRequest && body.datasetId && userId) {
         // User wants to create chart AND has dataset
-        
+
         // NEW: Check if chartType is already selected
         if (!body.chartType) {
           console.log("[DEBUG] Route: Ask for chart type preference");
@@ -238,7 +238,7 @@ export class AiController {
       "my data",
       "what dataset",
       "which dataset",
-      
+
       // Simple confirmations (when AI asks to show list)
       "yes",
       "ok",
@@ -372,7 +372,7 @@ export class AiController {
         chartGenerated: true,
         chartData: {
           ...result,
-          chartUrl: chartUrl, 
+          chartUrl: chartUrl,
         },
       };
     } catch (error: any) {
@@ -821,7 +821,7 @@ export class AiController {
       );
     }
   }
-   @Post('forecast')
+  @Post('forecast')
   @UseGuards(JwtAccessTokenGuard)
   @HttpCode(HttpStatus.OK)
   @ApiOperation({
@@ -856,8 +856,21 @@ export class AiController {
       if (e instanceof HttpException) {
         throw e;
       }
+      // If user already has an active job, return 409 Conflict
+      if (e.message?.includes('already have a forecast in progress')) {
+        throw new HttpException(
+          {
+            success: false,
+            message: e.message,
+          },
+          HttpStatus.CONFLICT
+        );
+      }
       throw new HttpException(
-        e.message || 'Failed to start forecast job',
+        {
+          success: false,
+          message: e.message || 'Failed to start forecast job',
+        },
         e.status || HttpStatus.INTERNAL_SERVER_ERROR
       );
     }
@@ -885,4 +898,4 @@ export class AiController {
     return result;
   }
 }
- 
+

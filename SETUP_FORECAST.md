@@ -76,6 +76,11 @@ source venv_tf/bin/activate
 
 ### 3.3. Install Python Dependencies
 
+**IMPORTANT: Upgrade pip first to avoid build issues**
+```bash
+pip install --upgrade pip setuptools wheel
+```
+
 **Option 1: Using requirements.txt (Recommended)**
 ```bash
 pip install -r requirements.txt
@@ -148,6 +153,45 @@ npm run prisma:generate
 ### Issue: TensorFlow installation fails
 - On Windows, you might need Visual C++ Redistributable
 - Try: `pip install tensorflow-cpu` instead of `tensorflow` (lighter version)
+
+### Issue: NumPy installation fails with UnicodeDecodeError
+**Error:** `UnicodeDecodeError: 'utf-8' codec can't decode byte...`
+
+This usually happens when:
+1. Your project path contains non-ASCII characters (e.g., Vietnamese, Chinese characters)
+2. NumPy is trying to build from source instead of using pre-built wheels
+
+**Solution 1: Upgrade pip and install tools first (Recommended)**
+```bash
+# Make sure venv is activated
+pip install --upgrade pip setuptools wheel
+pip install -r requirements.txt
+```
+
+**Solution 2: Move project to a path without special characters**
+- If your path is like `C:\Users\HELLO\OneDrive\Máy tính\...` (contains "Máy tính")
+- Move the project to a path with only English characters, e.g., `C:\Users\HELLO\Desktop\BE_WEB`
+- Then create venv and install again
+
+**Solution 3: Install packages one by one with specific versions**
+```bash
+pip install --upgrade pip setuptools wheel
+pip install numpy==1.26.4  # Use specific version with pre-built wheels
+pip install pandas==2.1.4
+pip install scikit-learn==1.3.2
+pip install tensorflow==2.15.0
+pip install matplotlib==3.8.2
+```
+
+**Solution 4: Use pre-built wheels only (no source builds)**
+```bash
+pip install --only-binary :all: -r requirements.txt
+```
+
+**Solution 5: If using Python 3.14+ (very new version)**
+- Some packages might not have pre-built wheels yet
+- Consider using Python 3.11 or 3.12 for better compatibility
+- Check: `python --version`
 
 ### Issue: Database migration fails
 - Check DATABASE_URL in .env file

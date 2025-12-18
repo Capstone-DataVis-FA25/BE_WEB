@@ -1,5 +1,5 @@
-import { ApiProperty, ApiPropertyOptional } from '@nestjs/swagger';
-import { IsString, IsOptional, IsNumber, IsArray } from 'class-validator';
+import { ApiPropertyOptional, ApiProperty } from '@nestjs/swagger';
+import { IsString, IsOptional, IsNumber, IsArray, IsBoolean } from 'class-validator';
 
 export class ForecastDto {
     @ApiPropertyOptional({
@@ -43,22 +43,27 @@ export class ForecastDto {
     @IsString({ each: true })
     featureColumns?: string[];
 
-    @ApiPropertyOptional({
-        description: 'Time scale: Daily, Weekly, Monthly, Quarterly, Yearly, Hourly',
-        example: 'Daily',
-        default: 'Daily'
+    @ApiProperty({
+        description: 'Model type: SVR or LSTM',
+        example: 'LSTM'
     })
-    @IsOptional()
     @IsString()
-    timeScale?: string;
+    modelType: string;
 
-    @ApiPropertyOptional({
+    @ApiProperty({
         description: 'Forecast window (number of steps to predict)',
-        example: 30,
-        default: 30
+        example: 30
     })
-    @IsOptional()
     @IsNumber()
-    forecastWindow?: number;
+    forecastWindow: number;
+
+  @ApiPropertyOptional({
+    description: 'Whether to run AI chart analysis immediately after forecast creation',
+    example: true,
+    default: true,
+  })
+  @IsOptional()
+  @IsBoolean()
+  runAnalysisAfterForecast?: boolean;
 }
 
