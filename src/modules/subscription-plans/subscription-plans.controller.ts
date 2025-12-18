@@ -21,7 +21,6 @@ import { SubscriptionPlansService } from './subscription-plans.service';
 import { CreateSubscriptionPlanDto } from './dto/create-subscription-plan.dto';
 import { UpdateSubscriptionPlanDto } from './dto/update-subscription-plan.dto';
 import { JwtAccessTokenGuard } from '@modules/auth/guards/jwt-access-token.guard';
-import { AuthRequest } from '@modules/auth/auth.controller';
 import { Roles } from 'src/decorators/roles.decorator';
 import { RolesGuard } from '@modules/auth/guards/roles.guard';
 import { UserRole } from '@modules/users/dto/create-user.dto';

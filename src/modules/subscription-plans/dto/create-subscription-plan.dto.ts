@@ -29,6 +29,12 @@ export class PlanLimitsDto {
     @IsNumber()
     @IsPositive()
     maxFileSize?: number;
+
+    @ApiProperty({ required: false, description: "AI request limit per month" })
+    @IsOptional()
+    @IsNumber()
+    @IsPositive()
+    maxAiRequests?: number;
 }
 
 export class CreateSubscriptionPlanDto {
