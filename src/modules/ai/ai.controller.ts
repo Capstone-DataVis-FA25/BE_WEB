@@ -26,6 +26,7 @@ import {
 import { FileInterceptor } from "@nestjs/platform-express";
 import { diskStorage } from "multer";
 import { AiService } from "@modules/ai/ai.service";
+import { AiRequestService } from "./ai-request.service";
 import { CleanCsvDto } from "./dto/clean-csv.dto";
 import { CleanExcelUploadDto } from "./dto/clean-excel.dto";
 import { ChatWithAiDto } from "./dto/chat-with-ai.dto";
@@ -38,6 +39,7 @@ import { PrismaService } from "../../prisma/prisma.service";
 import { DatasetsService } from "../datasets/datasets.service";
 import { AiChartEvaluationService } from "./ai.chart-evaluation.service";
 import { JwtAccessTokenGuard } from "@modules/auth/guards/jwt-access-token.guard";
+import { AiRequestGuard } from "./guards/ai-request.guard";
 import { EvaluateChartDto } from "./dto/evaluate-chart.dto";
 import { AuthRequest } from "@modules/auth/auth.controller";
 import { ForecastProcessingService } from "@modules/forecasts/forecast-processing.service";
@@ -50,6 +52,7 @@ import { ForecastDto } from "./dto/forecast.dto";
 export class AiController {
   constructor(
     private readonly aiService: AiService,
+    private readonly aiRequestService: AiRequestService,
     private readonly aiCleanJobService: AiCleanJobService,
     private readonly aiChartEvaluationService: AiChartEvaluationService,
     private readonly prismaService: PrismaService,
@@ -86,7 +89,7 @@ export class AiController {
 
       if (isChartRequest && body.datasetId && userId) {
         // User wants to create chart AND has dataset
-        
+
         // NEW: Check if chartType is already selected
         if (!body.chartType) {
           console.log("[DEBUG] Route: Ask for chart type preference");
@@ -238,7 +241,7 @@ export class AiController {
       "my data",
       "what dataset",
       "which dataset",
-      
+
       // Simple confirmations (when AI asks to show list)
       "yes",
       "ok",
@@ -372,7 +375,7 @@ export class AiController {
         chartGenerated: true,
         chartData: {
           ...result,
-          chartUrl: chartUrl, 
+          chartUrl: chartUrl,
         },
       };
     } catch (error: any) {
@@ -385,6 +388,7 @@ export class AiController {
 
   // Clean raw CSV via AI
   @Post("clean")
+  @UseGuards(JwtAccessTokenGuard, AiRequestGuard)
   @HttpCode(HttpStatus.OK)
   @ApiOperation({ summary: "Clean CSV data and return a 2D JSON array" })
   @ApiOkResponse({
@@ -413,6 +417,7 @@ export class AiController {
 
   // Clean uploaded Excel/CSV and return a 2D JSON matrix via AI
   @Post("clean-excel")
+  @UseGuards(JwtAccessTokenGuard, AiRequestGuard)
   @ApiOperation({
     summary:
       "Clean data from an uploaded Excel/CSV file and return a 2D JSON array",
@@ -458,6 +463,7 @@ export class AiController {
 
   // Clean raw CSV via AI (ASYNC, returns jobId, not result)
   @Post("clean-async")
+  @UseGuards(JwtAccessTokenGuard, AiRequestGuard)
   @HttpCode(HttpStatus.OK)
   @ApiOperation({
     summary: "Clean CSV data async, return jobId, notify user when done",
@@ -509,6 +515,7 @@ export class AiController {
 
   // Clean uploaded Excel/CSV file via AI (ASYNC, returns jobId, not result)
   @Post("clean-excel-async")
+  @UseGuards(JwtAccessTokenGuard, AiRequestGuard)
   @ApiOperation({
     summary:
       "Clean uploaded Excel/CSV file async, return jobId, notify user when done",
@@ -675,7 +682,7 @@ export class AiController {
   }
 
   @Post('evaluate-chart')
-  @UseGuards(JwtAccessTokenGuard)
+  @UseGuards(JwtAccessTokenGuard, AiRequestGuard)
   @HttpCode(HttpStatus.OK)
   @ApiOperation({
     summary: 'Evaluate a chart using AI based on its image and dataset',
@@ -821,8 +828,8 @@ export class AiController {
       );
     }
   }
-   @Post('forecast')
-  @UseGuards(JwtAccessTokenGuard)
+  @Post('forecast')
+  @UseGuards(JwtAccessTokenGuard, AiRequestGuard)
   @HttpCode(HttpStatus.OK)
   @ApiOperation({
     summary: 'Generate time series forecast (async)',
@@ -884,5 +891,29 @@ export class AiController {
     }
     return result;
   }
+
+  @Get('request-status')
+  @UseGuards(JwtAccessTokenGuard)
+  @ApiOperation({ summary: 'Get current AI request count and limit for user' })
+  @ApiOkResponse({
+    description: 'AI request status',
+    schema: {
+      type: 'object',
+      properties: {
+        currentCount: { type: 'number' },
+        maxLimit: { type: 'number' },
+        remaining: { type: 'number' },
+      },
+    },
+  })
+  async getAiRequestStatus(@Request() req: AuthRequest) {
+    const userId = req.user.userId || req.user.sub;
+    const status = await this.aiRequestService.getAiRequestStatus(userId);
+    return {
+      code: 200,
+      message: 'Success',
+      data: status,
+    };
+  }
 }
- 
+
