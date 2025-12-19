@@ -159,7 +159,13 @@ export class AiChartEvaluationService {
       include: {
         dataset: {
           include: {
-            headers: true,
+            headers: {
+              select: {
+                name: true,
+                type: true,
+                index: true,
+              },
+            },
           },
         },
       },
@@ -181,191 +187,92 @@ export class AiChartEvaluationService {
       );
     }
 
-    // 2. Get dataset headers (already decrypted by PrismaService extension)
+    // 2. Get dataset headers (names/types only, no row data)
     const decryptedHeaders = chart.dataset.headers
       .map((header: any) => ({
         name: header.name,
         type: header.type,
         index: header.index,
-        data: header.data || [],
       }))
       .sort((a, b) => a.index - b.index);
 
-    // 2.5. Get selected columns from request (sent by frontend)
-    const selectedColumns = dto.selectedColumns || [];
+    // 2.5. Get selected columns from request (sent by frontend) or default to all
+    const selectedColumns =
+      dto.selectedColumns && dto.selectedColumns.length > 0
+        ? dto.selectedColumns
+        : decryptedHeaders.map((h: any) => h.name);
 
-    console.log('selectedColumns: ', selectedColumns);
-
-    this.logger.debug(`[evaluateChart] Selected columns from frontend: ${selectedColumns.join(', ')}`);
-
-    // 3. Build dataset sample (first 50 rows for context)
-    const sampleSize = Math.min(50, decryptedHeaders[0]?.data?.length || 0);
-    const datasetSample: any[][] = [];
-
-    // Add header row
-    datasetSample.push(decryptedHeaders.map((h) => h.name));
-
-    // Add data rows
-    for (let i = 0; i < sampleSize; i++) {
-      const row = decryptedHeaders.map((h) => h.data[i]);
-      datasetSample.push(row);
-    }
+    this.logger.debug(
+      `[evaluateChart] Selected columns from frontend: ${selectedColumns.join(', ')}`
+    );
 
     const datasetInfo = {
       totalRows: chart.dataset.rowCount,
       totalColumns: chart.dataset.columnCount,
       headers: decryptedHeaders.map((h) => ({ name: h.name, type: h.type })),
-      sampleData: datasetSample,
     };
 
     // 4. Build AI prompt
     const language = dto.language || "vi";
 
     // System prompt with evaluation criteria
-    const systemPrompt = `You are an expert data visualization and data analysis specialist. You will evaluate charts with a focus on:
-1. **Detailed data analysis from the chart image**: Read and interpret the actual values, bars, lines, or segments visible in the chart
-2. Data visualization best practices and chart type appropriateness
-3. Statistical insights: comparisons, rankings, trends, and patterns
-4. Color scheme, aesthetics, clarity and readability
-5. Accuracy of data representation and accessibility
+    const systemPrompt = `You are an expert data analyst and data visualization specialist. Your job is to extract and explain insights directly from chart images and minimal dataset context.
 
-When analyzing a chart image and dataset, please provide:
+  Core rules:
+  - ONLY report numeric values that are visibly shown on the chart. If a number is not clearly visible, DO NOT invent or guess it—use relative comparisons instead (e.g., "largest", "about half", "roughly 3x").
+  - Focus ONLY on deep data analysis: comparisons, gaps, rankings, distributions, trends, anomalies, segments (top/mid/low), and business meaning/actionables.
+  - Include cross-series comparisons (e.g., Final vs Midterm vs Quiz across classes), using relative language when numbers are absent.
+  - DO NOT evaluate chart suitability, aesthetics, or propose alternative visualizations.
+  - If the image is unclear or not a valid chart, notify with an error.
+  - Use structured HTML per user instructions.
+  - Language: respond entirely in ${language}; no other language is allowed.
+  `;
 
-1. **Detailed Data Analysis from Chart Image**:
-IMPORTANT: You MUST read and report the actual numeric values visible in the chart image.
-- What type of chart is this? (bar chart, line chart, pie chart, scatter plot, etc.)
-- List the EXACT categories/labels shown on the axes or legend
-- For EACH category/data point visible in the chart:
-  * State the SPECIFIC numeric value or approximate value you can see
-  * Example: "Platform A shows 45,000 revenue, Platform B shows 32,000 revenue, Platform C shows 28,000 revenue"
-  * For bar charts: read the height/length of each bar and state its value
-  * For line charts: identify key data points with their coordinates
-  * For pie charts: state the percentage or value of each slice
-- Provide data comparisons:
-  * Which category has the HIGHEST value? State the exact number
-  * Which category has the LOWEST value? State the exact number
-  * Calculate the difference or ratio between highest and lowest
-  * Identify any categories in the middle range
-  * Are there significant gaps between consecutive values?
-- Statistical summary:
-  * Approximate total/sum if applicable
-  * Average/mean value across categories
-  * Identify any outliers (values significantly higher or lower than others)
-  * Describe the overall distribution pattern (even, skewed, clustered, etc.)
-- Trends and patterns:
-  * Is there an increasing/decreasing trend?
-  * Are there any notable peaks, valleys, or inflection points?
-  * Any seasonal or cyclical patterns visible?
-- Business insights:
-  * What business story does this data tell?
-  * What decisions or actions might these numbers suggest?
+    // Build user prompt with dataset info (columns only) and selected columns
+    const columnsList = datasetInfo.headers
+      .map((h) => `${h.name} (${h.type})`)
+      .join(", ");
 
-2. Evaluate the suitability of the chart with the dataset:
-- Is this chart appropriate for the data type?
-- Does the chart help convey information most intuitively?
-
-3. Suggest alternative or complementary chart types (if more suitable):
-- If the chart is not suitable, suggest better chart alternatives.
-- If complementary charts are needed, propose supplementary chart types or components.
-
-4. Suggest advanced enhancements for the chart:
-- What can be added/highlighted/emphasized to make the chart more intuitive (e.g., highlights, labels, grouping, filters, colors, annotations, trend lines, etc.)?
-- What insights or statistical information should be added to the chart?
-
-5. General improvement suggestions or deeper insights if any:
-- What additional metrics, groups, or data components should be analyzed based on the dataset?
-
-6. Propose additional visualization directions:
-- Suggest other visualization formats (dashboards, combined charts, small multiples, heatmaps, maps, distribution plots, etc.) that can further reveal insights.
-- Recommend multi-chart layouts or storytelling flows to enhance analysis.
-- Propose interactive visualization ideas (filters, drill-down, tooltips, segmented views).
-
-Note: If the image is unclear or not a valid chart image, notify the user with an error message.
-
-Provide constructive feedback and specific recommendations for improvement.
-Important: You MUST answer entirely in the following language, with no exceptions: ${language}.  
-Your entire response must be written 100% in ${language}, and you are NOT allowed to use any other language.
-`;
-
-    // Build user prompt with dataset info and questions
     let userPrompt = `
-I have a chart visualizing specific columns from a dataset. Please analyze it carefully.
+  I have a chart visualizing specific columns from a dataset. Please perform a deep, geographic/demographic-style data analysis focusing ONLY on the data itself.
 
-<strong>Chart Configuration:</strong>
-- Chart Type: ${chart.type}
-${selectedColumns.length > 0 ? `- Selected Columns Being Visualized: <strong>${selectedColumns.join(', ')}</strong>` : ''}
+  <strong>Chart Context:</strong>
+  - Chart Type: ${chart.type}
+  - Columns selected for this chart: <strong>${selectedColumns.join(', ')}</strong>
 
-<strong>Dataset Information:</strong>
-- Total Rows: ${datasetInfo.totalRows}
-- Total Columns: ${datasetInfo.totalColumns}
-- All Available Columns: ${datasetInfo.headers.map((h) => `${h.name} (${h.type})`).join(", ")}
+  <strong>Dataset Information (no sample rows provided):</strong>
+  - Total Rows: ${datasetInfo.totalRows}
+  - Total Columns: ${datasetInfo.totalColumns}
+  - All Available Columns: ${columnsList}
 
-<strong>Dataset Sample (first ${sampleSize} rows):</strong>
-<pre>${JSON.stringify(datasetSample, null, 2)}</pre>
+  <strong>MANDATORY - Detailed Data Analysis:</strong>
+  - Read and list EVERY visible value/number from the chart image. If a number is not visible or unclear, DO NOT guess—describe RELATIVE sizes only (e.g., "largest", "about half", "roughly 3x").
+  - List each category/label with its value if visible; otherwise note that the value is not labeled and provide a relative comparison.
+  - Identify highest, lowest, middle ranges; quantify gaps, ratios, và shares only when numbers are visible. If not, provide relative gaps instead.
+  - Provide statistical insights (total, average, median, mode, standard deviation, distribution shape, outliers) only when numbers are visible; if not, describe distribution patterns and relative concentrations without fabricating numbers.
+  - Segment into tiers (top/mid/low performers) based on values or relative heights; mô tả sự tập trung/mật độ (ví dụ: "top tier chiếm X% tổng số" hoặc "các giá trị phân bố đều").
+  - So sánh sát sao giữa các nhóm gần nhau (ví dụ: English vs Math), nêu rõ sự chênh lệch hoặc tương đồng.
+  - Tính tỷ lệ phần trăm từng nhóm/môn so với tổng (nếu có số), hoặc mô tả tỷ trọng tương đối.
+  - Nhận diện outlier (giá trị vượt trội hoặc thấp bất thường) và giải thích ý nghĩa.
+  - Đưa ra nhận định về xu hướng (ví dụ: nhóm môn nghệ thuật có xu hướng cao hơn các môn khác, hay các giá trị đang tăng/giảm).
+  - So sánh chéo series (Final/Midterm/Quiz) giữa các lớp, dùng số khi có, nếu không thì mô tả tương đối.
+  - Đưa ra nhận định kinh doanh, ý nghĩa thực tiễn và hành động gợi ý: ai/nhóm nào cần chú ý, nên làm gì để cải thiện, đề xuất hoạt động cụ thể (ví dụ: tổ chức workshop, khảo sát lý do, tăng cường truyền thông, đổi mới phương pháp...).
 
-<strong>CRITICAL INSTRUCTIONS:</strong>
-You MUST analyze the chart image in detail and report the specific numeric values you can see.
-${selectedColumns.length > 0 ? `
-This chart is specifically visualizing these columns: <strong>${selectedColumns.join(', ')}</strong>
-Focus your analysis on the relationship between these columns and the patterns visible in the chart data.
-` : ''}
-
-For EACH category visible in the chart, you must:
-1. Read and state the EXACT or APPROXIMATE numeric value shown
-2. Compare values: identify which is highest, lowest, and calculate differences
-3. Provide statistical insights: totals, averages, distributions
-4. Explain what these specific numbers mean in business context
-
-Example of expected analysis:
-"Looking at the chart:
-- Category A shows approximately X (highest)
-- Category B shows approximately Y 
-- Category C shows approximately Z (lowest)
-- The difference between highest and lowest is [X-Z]
-- Category A represents [percentage]% of the total
-- This indicates that..."
-`;
-
-    if (dto.questions && dto.questions.length > 0) {
-      userPrompt += `
-<strong>Specific Questions:</strong>
-${dto.questions.map((q, i) => `${i + 1}. ${q}`).join("<br>")}
-`;
-    }
+  Return the analysis in clean HTML following the formatting rules below.
+  `;
 
     const requiredSections =
       language === "vi"
-        ? [
-          "1. Phân tích dữ liệu chi tiết",
-          "2. Đánh giá loại biểu đồ và tính phù hợp",
-          "3. Điểm mạnh của trực quan hóa hiện tại",
-          "4. Điểm yếu hoặc các khía cạnh cần cải thiện",
-          "5. Đề xuất cụ thể",
-          "6. Thông tin chi tiết và thống kê bổ sung",
-          "7. Đề xuất các phương án trực quan hóa thay thế",
-        ]
-        : [
-          "1. Detailed Data Analysis",
-          "2. Chart Type and Suitability Evaluation",
-          "3. Strengths of Current Visualization",
-          "4. Weaknesses or Areas for Improvement",
-          "5. Specific Recommendations",
-          "6. Additional Insights and Statistics",
-          "7. Proposed Visualization Alternatives",
-        ];
+        ? ["Phân tích dữ liệu chi tiết"]
+        : ["Detailed Data Analysis"];
 
     userPrompt += `
 Please analyze the chart image and dataset following this structure:
 
-<strong>MANDATORY FIRST SECTION - Detailed Data Reading:</strong>
-Before anything else, you MUST:
-1. Read every visible value/number from the chart image
-2. List each category/label with its corresponding numeric value
-3. State which has the highest value, lowest value, and the exact numbers
-4. Calculate and show comparisons (differences, ratios, percentages)
-5. Provide statistical summary (total, average, distribution)
-
-Then continue with standard evaluation sections.
+<strong>MANDATORY SECTION - Detailed Data Analysis:</strong>
+- Read and report values (or relative sizes if unlabeled)
+- Identify highest, lowest, gaps, and distribution
+- Provide patterns, trends, segments, and business meaning
 
 <strong>HTML Formatting Requirements:</strong>
 - <h2> for section titles with style="color: #2563eb; font-size: 1.125rem; font-weight: 600; margin-top: 1.5rem; margin-bottom: 0.75rem; padding-bottom: 0.5rem;"
@@ -375,7 +282,7 @@ Then continue with standard evaluation sections.
 - <strong> for emphasis and numbers with style="color: #fffff; font-weight: 600;"
 - Use <code> tags for specific values: <code style="background: #1f2937; padding: 0.125rem 0.375rem; border-radius: 0.25rem; color: #fffff;">value</code>
 
-<strong>Required Sections (use these as h2 headers):</strong>
+<strong>Required Section (use this as the single h2 header):</strong>
 ${requiredSections.join("\n")}
 
 Return ONLY clean HTML content without markdown code blocks or backticks.
@@ -406,8 +313,7 @@ Your entire response must be written 100% in ${language}, and you are NOT allowe
     this.logger.debug(`[evaluateChart] User prompt: ${userPrompt}`);
 
     const body = {
-      model: "openai/gpt-4o", // Use GPT-4o (best vision model for chart analysis)
-      messages: modelMessages,
+       messages: modelMessages,
       temperature: 0.7,
       max_tokens: 3000, // Increased for comprehensive analysis
     };
@@ -432,11 +338,7 @@ Your entire response must be written 100% in ${language}, and you are NOT allowe
         name: chart.name,
         type: chart.type,
       },
-      datasetInfo: {
-        name: chart.dataset.name,
-        rows: datasetInfo.totalRows,
-        columns: datasetInfo.totalColumns,
-      },
+      selectedColumns,
       processingTime: elapsed,
     };
   }
