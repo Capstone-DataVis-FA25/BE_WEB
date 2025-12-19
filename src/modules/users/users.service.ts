@@ -267,18 +267,18 @@ export class UsersService {
     ]);
 
     // Get AI requests count directly from User model
-    const aiRequestsCount =  0;
+    const aiRequestsCount = user.aiRequestsCount;
 
     // Get limits from subscription plan
     const limits = user.subscriptionPlan?.limits as any || {};
     const maxDatasets = limits?.maxDatasets || null;
     const maxCharts = limits?.maxCharts || null;
-    const maxAIRequests = limits?.maxAIRequests || null;
+    const maxAiRequests = limits?.maxAiRequests || null;
 
     // Calculate percentages
     const datasetsPercentage = maxDatasets ? Math.round((datasetsCount / maxDatasets) * 100) : 0;
     const chartsPercentage = maxCharts ? Math.round((chartsCount / maxCharts) * 100) : 0;
-    const aiRequestsPercentage = maxAIRequests ? Math.round((aiRequestsCount / maxAIRequests) * 100) : 0;
+    const aiRequestsPercentage = maxAiRequests ? Math.round((aiRequestsCount / maxAiRequests) * 100) : 0;
 
     // Check if nearing limits (>80%)
     const warnings: string[] = [];
@@ -295,7 +295,7 @@ export class UsersService {
       limits: {
         maxDatasets,
         maxCharts,
-        maxAIRequests,
+        maxAiRequests,
       },
       percentage: {
         datasets: datasetsPercentage,

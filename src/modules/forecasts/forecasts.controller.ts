@@ -17,6 +17,7 @@ import { ForecastsService } from './forecasts.service';
 import { CreateForecastDto } from './dto/create-forecast.dto';
 import { UpdateForecastDto } from './dto/update-forecast.dto';
 import { JwtAccessTokenGuard } from '../auth/guards/jwt-access-token.guard';
+import { AiRequestGuard } from '../ai/guards/ai-request.guard';
 import { AuthRequest } from '../auth/auth.controller';
 import { ApiTags, ApiBearerAuth, ApiOperation } from '@nestjs/swagger';
 import { AiChartEvaluationService } from '../ai/ai.chart-evaluation.service';
@@ -32,7 +33,7 @@ export class ForecastsController {
     @Inject(forwardRef(() => AiChartEvaluationService))
     private readonly aiChartEvaluationService: AiChartEvaluationService,
     private readonly forecastAnalysisJobService: ForecastAnalysisJobService,
-  ) {}
+  ) { }
 
   @Post()
   @ApiOperation({ summary: 'Create a new forecast' })
@@ -69,14 +70,15 @@ export class ForecastsController {
   }
 
   @Post(':id/analyze')
+  @UseGuards(AiRequestGuard)
   @ApiOperation({ summary: 'Trigger AI analysis for an existing forecast (async)' })
   async analyzeForecast(@Param('id') id: string, @Request() req: AuthRequest) {
     const userId = req.user.userId || req.user.sub;
-    
+
     try {
       // Get forecast to verify ownership and get chart image URL
       const forecast = await this.forecastsService.findOne(id, userId);
-      
+
       if (!forecast.chartImageUrl) {
         throw new HttpException(
           'Forecast does not have a chart image to analyze',
@@ -113,7 +115,7 @@ export class ForecastsController {
   getAnalysisJobStatus(@Param('jobId') jobId: string, @Request() req: AuthRequest) {
     const userId = req.user.userId || req.user.sub;
     const status = this.forecastAnalysisJobService.getJobStatus(jobId);
-    
+
     if (!status) {
       throw new HttpException('Job not found', HttpStatus.NOT_FOUND);
     }

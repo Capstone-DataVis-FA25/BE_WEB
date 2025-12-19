@@ -370,27 +370,13 @@ Your entire response must be written 100% in ${language}, and you are NOT allowe
         ? chartImageUrl.substring(1)
         : chartImageUrl;
 
-      // Resolve project root using the same method as ai.service.ts
+      // Resolve project root using process.cwd() - same as ai.service.ts
       // This ensures consistency with where the image was saved
-      const isProduction = __dirname.includes('dist');
-
-      // Get the script directory path (same as ai.service.ts)
-      const baseDir = isProduction
-        ? path.join(__dirname, '..', '..', '..', 'src', 'modules', 'ai')
-        : __dirname;
-
-      // Construct the script path to get the script directory
-      const scriptPath = path.join(baseDir, 'ai-model', 'AI_Training.py');
-      const scriptDir = path.dirname(scriptPath);
-
-      // From scriptDir (src/modules/ai/ai-model), go up 4 levels to get to BE_WEB root
-      // ai-model -> ai -> modules -> src -> BE_WEB
-      const projectRoot = path.resolve(scriptDir, '..', '..', '..', '..');
+      // Use process.cwd() so it works the same in dev and after build,
+      // assuming the Nest app is started from the BE_WEB project root.
+      const projectRoot = process.cwd();
 
       const fullImagePath = path.join(projectRoot, 'public', imagePath);
-
-      this.logger.log(`[analyzeForecastChart] Resolved project root: ${projectRoot}`);
-      this.logger.log(`[analyzeForecastChart] Script dir: ${scriptDir}`);
 
       this.logger.log(`[analyzeForecastChart] Looking for image at: ${fullImagePath}`);
       this.logger.log(`[analyzeForecastChart] Image exists: ${fs.existsSync(fullImagePath)}`);
@@ -409,89 +395,166 @@ Your entire response must be written 100% in ${language}, and you are NOT allowe
       this.logger.log(`[analyzeForecastChart] Image loaded, size: ${imageBuffer.length} bytes`);
       this.logger.log(`[analyzeForecastChart] Base64 length: ${base64Image.length} chars`);
 
-      // Build AI prompt for forecast analysis
-      const systemPrompt = `You are an expert data analyst specializing in time series forecasting and prediction analysis. 
-Analyze the forecast chart image provided and provide insights about the DATA and PREDICTIONS ONLY. Do NOT comment on the model itself, model performance, or technical aspects of the forecasting method.
+      // Fetch forecast with dataset information to get context
+      const forecast = await this.prismaService.prisma.forecast.findUnique({
+        where: { id: forecastId },
+        include: {
+          dataset: {
+            select: {
+              id: true,
+              name: true,
+              headers: true, // Include headers to get available columns
+            },
+          },
+        },
+      });
 
-Focus your analysis on:
+      const targetColumn = forecast?.targetColumn || 'the metric';
+      const forecastName = forecast?.name || null;
+      const datasetName = forecast?.dataset?.name || null;
 
-1. **Trend Analysis**: 
-   - What trends do you observe in the historical data?
-   - How does the forecast trend compare to historical patterns?
-   - Are there any significant changes or anomalies in the data?
+      // Get performance metrics
+      const metrics = forecast?.metrics as any;
+      const testR2 = metrics?.testR2;
+      const testRMSE = metrics?.testRMSE;
+      const testMAE = metrics?.testMAE;
+      const testMAPE = metrics?.testMAPE;
 
-2. **Forecast Quality Assessment**:
-   - Does the forecast appear reasonable based on historical data patterns?
-   - Are there any concerning patterns or unexpected predictions in the forecasted values?
-   - What does the confidence interval tell us about prediction uncertainty?
+      // Get available columns from dataset headers
+      const availableColumns: string[] = [];
+      if (forecast?.dataset?.headers) {
+        // Headers are already decrypted by PrismaService extension
+        const headers = forecast.dataset.headers as any[];
+        availableColumns.push(...headers.map((h: any) => h.name));
+      }
 
-3. **Key Insights**:
-   - What are the main takeaways from this forecast?
-   - What should decision-makers pay attention to?
-   - Are there any actionable recommendations based on the predictions?
+      // Filter out time-related columns and the target column to suggest alternatives
+      const timeKeywords = ['year', 'month', 'day', 'date', 'time', 'timestamp', 'week'];
+      const numericColumns = availableColumns.filter(col => {
+        const header = (forecast?.dataset?.headers as any[])?.find((h: any) => h.name === col);
+        return header?.type === 'number' || header?.type === 'integer' || header?.type === 'float';
+      });
+      const alternativeColumns = numericColumns.filter(
+        col => col !== targetColumn && !timeKeywords.some(keyword => col.toLowerCase().includes(keyword))
+      );
 
-4. **Potential Concerns**:
-   - Are there any red flags or areas of uncertainty in the predictions?
-   - What factors might affect the accuracy of these predictions?
+      // Detect if forecasting a nonsensical column (time/date columns)
+      const isTimeColumn = timeKeywords.some(keyword =>
+        targetColumn.toLowerCase().includes(keyword)
+      );
 
-CRITICAL: 
-- Focus ONLY on the topic being forecasted and the predictions themselves
-- Do NOT mention the model type, model performance, overfitting, or technical model details
-- Do NOT comment on whether the model is good or bad
-- Focus on what the data and predictions tell us about the business/topic
+      // Build AI prompt for forecast analysis, written for normal business users
+      const systemPrompt = `You are an expert business data analyst.
+You are helping a non-technical user understand a forecast chart.
 
-IMPORTANT: You must provide the analysis in BOTH English and Vietnamese. Format your response EXACTLY as follows (return ONLY the sections, no other text):
+Your job is to write a clear, natural paragraph that jumps straight into INSIGHTS - no redundant descriptions of what the chart is. The user already knows it's a forecast chart.
+
+Start immediately with:
+- Key observations: highest/lowest values, notable peaks or drops, overall trends (increasing/decreasing/stable)
+- Patterns: seasonal patterns, cycles, volatility, stability
+- Future predictions: what the forecast shows (direction, magnitude, uncertainty)
+- Prediction reliability: based on model performance metrics (R², RMSE, MAE, MAPE), assess whether users should trust these predictions and how confident they should be
+- Context: what this means for the business/user (why it matters)
+- Concerns: any issues, risks, or things to watch out for
+- Actions: what the user should do based on this forecast
+
+CRITICAL VALIDATION:
+If the forecast is trying to predict a TIME/DATE column (like "Year", "Month", "Date", "Time"), this DOES NOT MAKE SENSE. Time columns are typically used as the X-axis (time dimension), not as something to predict. In this case, you MUST clearly explain that forecasting a time/date column is not meaningful and suggest forecasting a MEASUREMENT/VALUE column instead. When making recommendations, use the ACTUAL COLUMN NAMES from the dataset context provided - be specific and reference the actual columns available in their dataset.
+
+VERY IMPORTANT RULES:
+- Write for NORMAL BUSINESS USERS, not data scientists.
+- Use clear, simple language and avoid technical terms (no "confidence interval", "overfitting", etc.).
+- When interpreting performance metrics:
+  * R²: Explain in simple terms (e.g., "The model explains about X% of the variation in the data" or "The predictions are fairly reliable" vs "The predictions have significant uncertainty")
+  * R² > 0.7: Strong/very reliable predictions
+  * R² 0.5-0.7: Moderate reliability, predictions are somewhat trustworthy but have notable uncertainty
+  * R² < 0.5: Low reliability, predictions should be used with caution
+  * RMSE/MAE: Explain in terms of typical error size relative to the values being predicted
+  * MAPE: Explain as average percentage error (e.g., "predictions are typically off by about X%")
+- Always provide guidance on whether users should trust these predictions based on the metrics.
+- Write as a SINGLE, FLOWING PARAGRAPH (not bullet points or sections). Make it read naturally, like you're explaining to a colleague.
+- DO NOT start with "This chart shows..." or "The chart displays..." - jump straight into insights. The user already knows what a forecast chart is.
+- DO NOT describe what the chart is - focus on what the data TELLS US.
+- Keep it CONCISE: If the forecast is simple or doesn't have much to say, keep it short. Don't pad it with repetition.
+- Focus ONLY on what the data and predictions say about the real-world topic (e.g. sales, traffic, temperature), not on the model or algorithms.
+- Do NOT mention the model type, model performance, accuracy metrics, loss functions, or any technical details.
+- Be concrete and practical: specific values, clear trends, actionable insights.
+- AVOID REPETITION: Don't say the same thing multiple times. Each sentence should add new information.
+
+You MUST provide the analysis in BOTH English and Vietnamese. Format your response EXACTLY as follows (return ONLY the paragraphs, no other text):
 
 ---ENGLISH---
-1. Trend Analysis
-
-[Your trend analysis in English here]
-
-2. Forecast Quality Assessment
-
-[Your quality assessment in English here]
-
-3. Key Insights
-
-[Your key insights in English here]
-
-4. Potential Concerns
-
-[Your concerns in English here]
-
-5. Actionable Recommendations
-
-[Your recommendations in English here]
+[Write a single, natural paragraph in English that flows well and covers all the important points concisely]
 
 ---VIETNAMESE---
-1. Phân tích xu hướng
+[Viết một đoạn văn tự nhiên bằng tiếng Việt, trình bày mạch lạc và bao quát tất cả các điểm quan trọng một cách ngắn gọn]
 
-[Phân tích xu hướng của bạn bằng tiếng Việt ở đây]
+Return ONLY these two paragraphs with the exact headers shown above. Do not add any introductory text, conclusions, or additional commentary outside of these paragraphs.`;
 
-2. Đánh giá chất lượng dự báo
+      // Build context information
+      let contextInfo = `Target column being forecasted: "${targetColumn}".`;
+      if (forecastName) {
+        contextInfo = `Forecast name: "${forecastName}". ${contextInfo}`;
+      }
+      if (datasetName) {
+        contextInfo += ` Dataset: "${datasetName}".`;
+      }
+      if (availableColumns.length > 0) {
+        contextInfo += ` Available columns in dataset: ${availableColumns.join(', ')}.`;
+      }
 
-[Đánh giá chất lượng của bạn bằng tiếng Việt ở đây]
+      // Add performance metrics to context
+      let metricsInfo = '';
+      if (testR2 !== undefined && testR2 !== null) {
+        metricsInfo = `\n\nModel Performance Metrics:\n`;
+        metricsInfo += `- Test R²: ${testR2.toFixed(3)} (measures how well the model explains the data, higher is better, max is 1.0)\n`;
+        if (testRMSE !== undefined && testRMSE !== null) {
+          metricsInfo += `- Test RMSE: ${testRMSE.toFixed(3)} (average prediction error)\n`;
+        }
+        if (testMAE !== undefined && testMAE !== null) {
+          metricsInfo += `- Test MAE: ${testMAE.toFixed(3)} (average absolute error)\n`;
+        }
+        if (testMAPE !== undefined && testMAPE !== null) {
+          metricsInfo += `- Test MAPE: ${testMAPE.toFixed(2)}% (average percentage error)`;
+        }
+      }
 
-3. Những hiểu biết chính
+      const validationWarning = isTimeColumn
+        ? `\n\n⚠️ IMPORTANT: The target column "${targetColumn}" appears to be a TIME/DATE column. Forecasting time/date columns typically doesn't make business sense - you should forecast MEASUREMENT/VALUE columns instead.`
+        : '';
 
-[Những hiểu biết chính của bạn bằng tiếng Việt ở đây]
+      // Add specific alternative column suggestions if forecasting a time column
+      const alternativeSuggestions = isTimeColumn && alternativeColumns.length > 0
+        ? `\n\n💡 SUGGESTION: Based on the dataset columns, consider forecasting one of these numeric columns instead: ${alternativeColumns.slice(0, 5).join(', ')}.`
+        : '';
 
-4. Những lo ngại tiềm ẩn
+      const userPrompt = `Analyze this forecast chart and provide insights.
 
-[Những lo ngại của bạn bằng tiếng Việt ở đây]
+Context: ${contextInfo}${metricsInfo}${validationWarning}${alternativeSuggestions}
 
-5. Đề xuất hành động
+Write a single, natural paragraph that jumps STRAIGHT INTO INSIGHTS. Do NOT describe what the chart is - the user already knows it's a forecast chart.
 
-[Đề xuất của bạn bằng tiếng Việt ở đây]
+Focus on:
+- Key observations: highest/lowest values, peaks, drops, overall trend direction
+- Patterns: seasonal cycles, volatility, stability
+- Future outlook: what the forecast predicts (direction, magnitude, uncertainty ranges)
+- Prediction reliability: Based on the performance metrics provided, assess how trustworthy these predictions are and whether users should rely on them for decision-making
+- Business context: what this means and why it matters
+- Concerns: any issues or risks to watch
+- Actions: what to do based on this forecast (considering the reliability level)
 
-Return ONLY these sections with the exact section headers shown above. Do not add any introductory text, conclusions, or additional commentary outside of these sections.`;
+IMPORTANT FOR RECOMMENDATIONS:
+- When suggesting alternative columns to forecast, use the ACTUAL COLUMN NAMES from the dataset context above
+- Be specific: reference the exact column names available in their dataset (e.g., "Consider forecasting the 'Sales' column instead" not just "consider forecasting sales")
+- If forecasting a time column, suggest specific numeric columns from their dataset that would be more meaningful to forecast
+- Make recommendations relevant to their actual data, not generic suggestions
 
-      const userPrompt = `Please analyze this forecast chart image. The chart shows historical data and future predictions. 
-Provide a comprehensive analysis in BOTH English and Vietnamese, separated by the markers ---ENGLISH--- and ---VIETNAMESE---.
-Focus ONLY on the topic being forecasted and the predictions themselves. Do NOT comment on the model, model performance, or technical aspects.
-Return ONLY the 5 sections listed in the system prompt with the exact section headers.`;
+CRITICAL: Start immediately with insights. Do NOT begin with "This chart shows..." or "The chart displays..." - jump straight into what the data tells us (e.g., "Temperatures range from X to Y, with a slight downward trend...").
 
-      // Call OpenRouter API with Gemini vision model
+Keep it concise, natural, and actionable. Avoid repetition and technical jargon.
+Return your answer in BOTH English and Vietnamese, using EXACTLY the paragraph format described in the system prompt.`;
+
+      // Call OpenRouter API with GPT‑4o vision model for forecast analysis
       const modelMessages = [
         { role: "system", content: systemPrompt },
         {
@@ -512,17 +575,17 @@ Return ONLY the 5 sections listed in the system prompt with the exact section he
       ];
 
       const body = {
-        model: "google/gemini-2.0-flash-exp:free", // Use Gemini 2.0 Flash (free tier, supports vision)
+        model: "openai/gpt-4o", // Use GPT-4o vision model for forecast analysis
         messages: modelMessages,
         temperature: 0.7,
         max_tokens: 3000, // Increased for bilingual content (English + Vietnamese)
       };
 
       this.logger.log(
-        `[analyzeForecastChart] Calling OpenRouter API with Gemini model: ${body.model}`
+        `[analyzeForecastChart] Calling OpenRouter API with vision model: ${body.model}`
       );
       this.logger.log(
-        `[analyzeForecastChart] Sending image (base64 length: ${imageDataUrl.length}) and prompt to Gemini...`
+        `[analyzeForecastChart] Sending image (base64 length: ${imageDataUrl.length}) and prompt to model...`
       );
       this.logger.log(
         `[analyzeForecastChart] Max attempts: ${maxAttempts}`

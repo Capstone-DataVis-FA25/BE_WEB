@@ -815,7 +815,7 @@ IMPORTANT: Speak naturally about UI elements users can see. DON'T expose technic
 
     return { data: cleaned.data, rowCount: cleaned.rowCount, columnCount: cleaned.columnCount };
   }
-   async generateChartConfig(input: {
+  async generateChartConfig(input: {
     prompt: string;
     datasetId: string;
     headers: Array<{ id: string; name: string; type: string }>;
@@ -1170,11 +1170,11 @@ Generate a chart configuration that best matches this request.`;
       );
     }
   }
-    async forecast(options?: {
+  async forecast(options?: {
     csvData?: string;
     targetColumn?: string;
     featureColumns?: string[];
-    timeScale?: string;
+    modelType?: string;
     forecastWindow?: number;
   }) {
     this.logger.log('[forecast] Starting forecast execution');
@@ -1186,14 +1186,28 @@ Generate a chart configuration that best matches this request.`;
     if (!options?.targetColumn) {
       throw new BadRequestException('Target column is required for forecast');
     }
+    if (!options?.modelType) {
+      throw new BadRequestException('Model type is required for forecast (SVR or LSTM)');
+    }
+    if (!options?.forecastWindow) {
+      throw new BadRequestException('Forecast window is required for forecast');
+    }
 
-    this.logger.log('[forecast] Running in PRODUCTION MODE with real dataset');
+    this.logger.log('[forecast] Running forecast script');
 
-    const isProduction = __dirname.includes('dist');
-    const baseDir = isProduction
-      ? path.join(__dirname, '..', '..', '..', 'src', 'modules', 'ai')
-      : __dirname;
-    const scriptPath = path.join(baseDir, 'ai-model', 'AI_Training.py');
+    // Resolve project root and Python script path
+    // Use process.cwd() so it works the same in dev and after build,
+    // assuming the Nest app is started from the BE_WEB project root.
+    const projectRoot = process.cwd();
+
+    const scriptPath = path.join(
+      projectRoot,
+      'src',
+      'modules',
+      'ai',
+      'ai-model',
+      'AI_Training.py',
+    );
 
     // Check if script exists
     if (!fs.existsSync(scriptPath)) {
@@ -1202,7 +1216,6 @@ Generate a chart configuration that best matches this request.`;
     }
 
     const scriptDir = path.dirname(scriptPath);
-    const projectRoot = path.resolve(scriptDir, '..', '..', '..', '..');
     const venvPythonPath = path.resolve(projectRoot, 'venv_tf', 'Scripts', 'python.exe');
 
     // Log paths for debugging
@@ -1243,16 +1256,10 @@ Generate a chart configuration that best matches this request.`;
       PYTHONPATH: '', // Clear PYTHONPATH to avoid conflicts with D:\python-packages
     };
 
-    // Add forecast parameters as environment variables
-    if (options?.targetColumn) {
-      pythonEnv.TARGET_COLUMN = options.targetColumn;
-    }
-    if (options?.timeScale) {
-      pythonEnv.TIME_SCALE = options.timeScale;
-    }
-    if (options?.forecastWindow) {
-      pythonEnv.FORECAST_WINDOW = options.forecastWindow.toString();
-    }
+    // Add forecast parameters as environment variables (all required, validated above)
+    pythonEnv.TARGET_COLUMN = options.targetColumn;
+    pythonEnv.MODEL_TYPE = options.modelType;
+    pythonEnv.FORECAST_WINDOW = options.forecastWindow.toString();
 
     this.logger.log(`[forecast] Using dataset CSV data and forecast parameters`);
 
@@ -1347,17 +1354,27 @@ Generate a chart configuration that best matches this request.`;
 
         if (jsonStartIndex !== -1 && jsonEndIndex !== -1) {
           try {
-            const jsonText = stdoutText.substring(
+            // Extract JSON text between markers, removing any newlines that might have been inserted
+            let jsonText = stdoutText.substring(
               jsonStartIndex + jsonStartMarker.length,
               jsonEndIndex
             ).trim();
+
+            // Remove any newlines that might have been inserted by stdout line splitting
+            // The JSON should be on a single line, so replace newlines with spaces
+            jsonText = jsonText.replace(/\n/g, ' ').replace(/\r/g, '').replace(/\s+/g, ' ').trim();
+
             this.logger.log(`[forecast] Extracted JSON text length: ${jsonText.length} chars`);
             this.logger.log(`[forecast] First 200 chars of JSON: ${jsonText.substring(0, 200)}`);
+            this.logger.log(`[forecast] Last 200 chars of JSON: ${jsonText.substring(Math.max(0, jsonText.length - 200))}`);
+
             forecastData = JSON.parse(jsonText);
             this.logger.log(`[forecast] Successfully parsed forecast JSON data. Predictions: ${forecastData.predictions?.length || 0}`);
           } catch (parseError: any) {
             this.logger.warn(`[forecast] Failed to parse forecast JSON: ${parseError.message}`);
-            this.logger.warn(`[forecast] JSON text that failed: ${stdoutText.substring(jsonStartIndex + jsonStartMarker.length, jsonEndIndex).substring(0, 500)}`);
+            const failedJsonText = stdoutText.substring(jsonStartIndex + jsonStartMarker.length, jsonEndIndex);
+            this.logger.warn(`[forecast] JSON text length: ${failedJsonText.length} chars`);
+            this.logger.warn(`[forecast] JSON text around error position: ${failedJsonText.substring(Math.max(0, 4600), Math.min(failedJsonText.length, 4650))}`);
           }
         } else {
           this.logger.warn(`[forecast] JSON markers not found in stdout. Last 500 chars of stdout: ${stdoutText.slice(-500)}`);
@@ -1384,7 +1401,7 @@ Generate a chart configuration that best matches this request.`;
           try {
             const scriptDir = path.dirname(scriptPath);
             const sourceImagePath = path.join(scriptDir, 'forecast_plot.png');
-            
+
             if (fs.existsSync(sourceImagePath)) {
               // Create public/uploads/forecasts directory if it doesn't exist
               const publicDir = path.join(projectRoot, 'public', 'uploads', 'forecasts');

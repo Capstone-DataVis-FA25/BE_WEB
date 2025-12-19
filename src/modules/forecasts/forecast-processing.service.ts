@@ -32,7 +32,7 @@ export class ForecastProcessingService {
       csvData,
       targetColumn: dto.targetColumn,
       featureColumns: dto.featureColumns,
-      timeScale: dto.timeScale,
+      modelType: dto.modelType,
       forecastWindow: dto.forecastWindow,
     });
 
@@ -62,8 +62,11 @@ export class ForecastProcessingService {
     }
 
     // 5. Analyze chart with Gemini (optional - forecast can succeed without analysis)
+    // Controlled by dto.runAnalysisAfterForecast (default: true when undefined)
+    const shouldAnalyze = dto.runAnalysisAfterForecast !== false;
+
     // If analysis fails due to rate limits, we still return the forecast without analysis
-    if (result.chartImageUrl) {
+    if (shouldAnalyze && result.chartImageUrl) {
       this.logger.log(`[processForecast] Starting Gemini analysis for forecast ${savedForecast.id}`);
       this.logger.log(`[processForecast] Chart image URL: ${result.chartImageUrl}`);
 
@@ -111,6 +114,10 @@ export class ForecastProcessingService {
           // Analysis is optional, forecast is still valid
         }
       }
+    } else if (!shouldAnalyze) {
+      this.logger.log(
+        `[processForecast] Skipping analysis for forecast ${savedForecast.id} (runAnalysisAfterForecast=false)`,
+      );
     } else {
       this.logger.warn(`[processForecast] Cannot analyze chart: chartImageUrl is missing`);
       // Don't fail - forecast is still valid without analysis
@@ -122,7 +129,6 @@ export class ForecastProcessingService {
       metrics: result.forecastData.metrics || null,
       modelType: result.forecastData.modelType || null,
       forecastWindow: result.forecastData.forecastWindow || null,
-      timeScale: result.forecastData.timeScale || null,
       forecastId: savedForecast?.id || null,
       analyze: savedForecast?.analyze || null, // Include analysis if available
       featureColumns: savedForecast?.featureColumns || [], // Include featureColumns
@@ -222,9 +228,8 @@ export class ForecastProcessingService {
           datasetId: dto.datasetId,
           targetColumn: dto.targetColumn || 'Unknown',
           featureColumns: dto.featureColumns || [],
-          timeScale: result.forecastData?.timeScale || dto.timeScale || 'Daily',
           forecastWindow: result.forecastData?.forecastWindow || dto.forecastWindow || 30,
-          modelType: result.forecastData?.modelType || 'Unknown',
+          modelType: result.forecastData?.modelType || dto.modelType || 'Unknown',
           predictions: result.forecastData.predictions,
           metrics: result.forecastData.metrics || undefined,
           chartImageUrl: result.chartImageUrl || null,

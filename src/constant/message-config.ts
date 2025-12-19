@@ -28,5 +28,7 @@ export const Messages = {
   // Subscription limit messages
   DATASET_LIMIT_EXCEEDED: "You have reached the maximum number of datasets allowed for your subscription plan",
   CHART_LIMIT_EXCEEDED: "You have reached the maximum number of charts allowed for your subscription plan",
+  FILE_SIZE_LIMIT_EXCEEDED: "You have exceeded the maximum file size allowed for your subscription plan",
+  AI_REQUEST_LIMIT_EXCEEDED: "You have exceeded the maximum number of AI requests allowed for your subscription plan",
   NO_SUBSCRIPTION_PLAN: "No subscription plan found for your account",
 };

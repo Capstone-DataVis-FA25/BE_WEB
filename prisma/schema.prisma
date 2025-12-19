@@ -181,7 +181,6 @@ model Forecast {
   name          String?
   targetColumn  String
   featureColumns String[]  @default([])
-  timeScale     String
   forecastWindow Int
   modelType     String
   predictions   Json      // Array of prediction objects

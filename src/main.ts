@@ -20,8 +20,8 @@ async function bootstrap() {
 		allowedHeaders: "*",
 	});
 
-	// Serve static files
-	app.useStaticAssets(join(__dirname, "..", "public"));
+	// Serve static files from project root public directory
+	app.useStaticAssets(join(process.cwd(), "public"));
 
 	configSwagger(app);
 	const config_service = app.get(ConfigService);
