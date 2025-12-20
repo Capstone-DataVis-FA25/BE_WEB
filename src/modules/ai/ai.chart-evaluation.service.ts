@@ -313,7 +313,7 @@ Your entire response must be written 100% in ${language}, and you are NOT allowe
     this.logger.debug(`[evaluateChart] User prompt: ${userPrompt}`);
 
     const body = {
-       messages: modelMessages,
+      messages: modelMessages,
       temperature: 0.7,
       max_tokens: 3000, // Increased for comprehensive analysis
     };
@@ -428,68 +428,65 @@ Your entire response must be written 100% in ${language}, and you are NOT allowe
         availableColumns.push(...headers.map((h: any) => h.name));
       }
 
-      // Filter out time-related columns and the target column to suggest alternatives
-      const timeKeywords = ['year', 'month', 'day', 'date', 'time', 'timestamp', 'week'];
-      const numericColumns = availableColumns.filter(col => {
-        const header = (forecast?.dataset?.headers as any[])?.find((h: any) => h.name === col);
-        return header?.type === 'number' || header?.type === 'integer' || header?.type === 'float';
-      });
-      const alternativeColumns = numericColumns.filter(
-        col => col !== targetColumn && !timeKeywords.some(keyword => col.toLowerCase().includes(keyword))
-      );
-
-      // Detect if forecasting a nonsensical column (time/date columns)
-      const isTimeColumn = timeKeywords.some(keyword =>
-        targetColumn.toLowerCase().includes(keyword)
-      );
-
       // Build AI prompt for forecast analysis, written for normal business users
-      const systemPrompt = `You are an expert business data analyst.
-You are helping a non-technical user understand a forecast chart.
+      const systemPrompt = `You are an expert business data analyst helping non-technical users understand forecast charts.
 
-Your job is to write a clear, natural paragraph that jumps straight into INSIGHTS - no redundant descriptions of what the chart is. The user already knows it's a forecast chart.
-
-Start immediately with:
-- Key observations: highest/lowest values, notable peaks or drops, overall trends (increasing/decreasing/stable)
-- Patterns: seasonal patterns, cycles, volatility, stability
-- Future predictions: what the forecast shows (direction, magnitude, uncertainty)
-- Prediction reliability: based on model performance metrics (R², RMSE, MAE, MAPE), assess whether users should trust these predictions and how confident they should be
-- Context: what this means for the business/user (why it matters)
-- Concerns: any issues, risks, or things to watch out for
-- Actions: what the user should do based on this forecast
-
-CRITICAL VALIDATION:
-If the forecast is trying to predict a TIME/DATE column (like "Year", "Month", "Date", "Time"), this DOES NOT MAKE SENSE. Time columns are typically used as the X-axis (time dimension), not as something to predict. In this case, you MUST clearly explain that forecasting a time/date column is not meaningful and suggest forecasting a MEASUREMENT/VALUE column instead. When making recommendations, use the ACTUAL COLUMN NAMES from the dataset context provided - be specific and reference the actual columns available in their dataset.
+Your job is to write a clear, structured analysis that is easy to understand. The user already knows it's a forecast chart, so focus on insights, not descriptions.
 
 VERY IMPORTANT RULES:
 - Write for NORMAL BUSINESS USERS, not data scientists.
-- Use clear, simple language and avoid technical terms (no "confidence interval", "overfitting", etc.).
-- When interpreting performance metrics:
-  * R²: Explain in simple terms (e.g., "The model explains about X% of the variation in the data" or "The predictions are fairly reliable" vs "The predictions have significant uncertainty")
-  * R² > 0.7: Strong/very reliable predictions
-  * R² 0.5-0.7: Moderate reliability, predictions are somewhat trustworthy but have notable uncertainty
-  * R² < 0.5: Low reliability, predictions should be used with caution
-  * RMSE/MAE: Explain in terms of typical error size relative to the values being predicted
-  * MAPE: Explain as average percentage error (e.g., "predictions are typically off by about X%")
-- Always provide guidance on whether users should trust these predictions based on the metrics.
-- Write as a SINGLE, FLOWING PARAGRAPH (not bullet points or sections). Make it read naturally, like you're explaining to a colleague.
-- DO NOT start with "This chart shows..." or "The chart displays..." - jump straight into insights. The user already knows what a forecast chart is.
-- DO NOT describe what the chart is - focus on what the data TELLS US.
-- Keep it CONCISE: If the forecast is simple or doesn't have much to say, keep it short. Don't pad it with repetition.
+- Use clear, simple language and avoid ALL technical terms (no "R²", "RMSE", "MAE", "MAPE", "confidence interval", "overfitting", "model performance", etc.).
+- NEVER mention specific metric values or technical model details to the user.
+- Base your judgments on the performance metrics provided in the context, but translate them into plain language:
+  * R² > 0.7: "very reliable" or "highly trustworthy" predictions
+  * R² 0.5-0.7: "moderately reliable" or "somewhat trustworthy" predictions with "notable uncertainty"
+  * R² < 0.5: "low reliability" or "should be used with caution" - predictions have "significant uncertainty"
+  * High RMSE/MAE relative to values: "predictions may have large errors" or "significant prediction errors"
+  * High MAPE: "predictions are typically off by a large margin" or "high percentage error"
+- DO NOT show numbers like "R² of -0.172" or "RMSE of 233.949" - instead say "low reliability" or "significant prediction errors".
 - Focus ONLY on what the data and predictions say about the real-world topic (e.g. sales, traffic, temperature), not on the model or algorithms.
-- Do NOT mention the model type, model performance, accuracy metrics, loss functions, or any technical details.
-- Be concrete and practical: specific values, clear trends, actionable insights.
-- AVOID REPETITION: Don't say the same thing multiple times. Each sentence should add new information.
+- CRITICAL: You MUST extract and mention SPECIFIC STATISTICS from the chart image:
+  * Actual values: specific numbers, ranges, peaks, lows from the historical data
+  * Historical patterns: mention actual time periods, specific values at different points
+  * Forecast values: specific predicted numbers, ranges, and changes
+  * Comparisons: "increased from X to Y", "peaked at Z", "ranges between A and B"
+  * Percentage changes: "increased by X%", "decreased by Y%"
+- AVOID generic statements that could apply to any forecast. Every statement should be specific to THIS forecast's actual data.
+- Be concrete and practical: use actual numbers from the chart, describe specific trends and patterns visible in the data.
+- Explain WHY the forecast predicts what it does based on the actual historical patterns you see in the chart.
+- Keep each section concise but detailed with specific statistics.
 
-You MUST provide the analysis in BOTH English and Vietnamese. Format your response EXACTLY as follows (return ONLY the paragraphs, no other text):
+You MUST provide the analysis in BOTH English and Vietnamese. Format your response EXACTLY as follows with these clear sections:
 
 ---ENGLISH---
-[Write a single, natural paragraph in English that flows well and covers all the important points concisely]
+Summary
+[Describe the overall trend in the historical data with SPECIFIC STATISTICS from the chart. Include actual values, ranges, peaks, lows, and time periods. For example: "The historical data shows values ranging from X to Y, with a peak of Z in [time period] and a low of W in [time period]." Mention if it's increasing, decreasing, or stable, and include specific numbers to support your description. Keep it detailed and data-driven.]
+
+Future Outlook
+[Describe what the forecast predicts with SPECIFIC NUMBERS and VALUES from the chart. Include actual predicted values, ranges, and changes. For example: "The forecast predicts values will [increase/decrease] from [current value] to [predicted value] over the next [time period], representing a [X%] change." Explain WHY the forecast predicts this based on the historical patterns you observe in the chart. Based on the model performance metrics (which you have access to but should NOT mention by name), incorporate reliability assessment naturally - if predictions are unreliable, mention it here (e.g., "these predictions should be used with caution" or "the forecast shows significant uncertainty"). Keep it specific to the actual forecast values shown.]
+
+Key Takeaways
+[Provide 2-4 clear, SPECIFIC bullet points that are unique to THIS forecast's actual data. Each point should reference specific values, patterns, or predictions from the chart. Avoid generic advice that could apply to any forecast. For example:
+- "Values are expected to [specific change] from [specific number] to [specific number], which is [specific context/reason]"
+- "The historical pattern shows [specific pattern with numbers], suggesting [specific insight]"
+- "Based on the [specific historical behavior], users should [specific action related to this forecast's data]"
+Make each point actionable and specific to the actual forecast data shown.]
 
 ---VIETNAMESE---
-[Viết một đoạn văn tự nhiên bằng tiếng Việt, trình bày mạch lạc và bao quát tất cả các điểm quan trọng một cách ngắn gọn]
+Tóm tắt
+[Mô tả xu hướng tổng thể trong dữ liệu lịch sử với CÁC THỐNG KÊ CỤ THỂ từ biểu đồ. Bao gồm các giá trị thực tế, phạm vi, đỉnh, đáy và khoảng thời gian. Ví dụ: "Dữ liệu lịch sử cho thấy các giá trị dao động từ X đến Y, với đỉnh Z vào [khoảng thời gian] và đáy W vào [khoảng thời gian]." Đề cập nếu nó đang tăng, giảm hoặc ổn định, và bao gồm các con số cụ thể để hỗ trợ mô tả của bạn. Giữ chi tiết và dựa trên dữ liệu.]
 
-Return ONLY these two paragraphs with the exact headers shown above. Do not add any introductory text, conclusions, or additional commentary outside of these paragraphs.`;
+Triển vọng tương lai
+[Mô tả những gì dự báo dự đoán với CÁC SỐ VÀ GIÁ TRỊ CỤ THỂ từ biểu đồ. Bao gồm các giá trị dự đoán thực tế, phạm vi và thay đổi. Ví dụ: "Dự báo dự đoán các giá trị sẽ [tăng/giảm] từ [giá trị hiện tại] đến [giá trị dự đoán] trong [khoảng thời gian] tiếp theo, đại diện cho thay đổi [X%]." Giải thích TẠI SAO dự báo dự đoán điều này dựa trên các mẫu lịch sử bạn quan sát trong biểu đồ. Dựa trên các chỉ số hiệu suất mô hình (mà bạn có quyền truy cập nhưng KHÔNG nên đề cập tên), kết hợp đánh giá độ tin cậy một cách tự nhiên - nếu các dự đoán không đáng tin cậy, hãy đề cập ở đây (ví dụ: "các dự đoán này nên được sử dụng thận trọng" hoặc "dự báo cho thấy độ không chắc chắn đáng kể"). Giữ cụ thể cho các giá trị dự báo thực tế được hiển thị.]
+
+Điểm chính
+[Đưa ra 2-4 điểm rõ ràng, CỤ THỂ duy nhất cho dữ liệu thực tế của DỰ BÁO NÀY. Mỗi điểm nên tham chiếu các giá trị, mẫu hoặc dự đoán cụ thể từ biểu đồ. Tránh lời khuyên chung chung có thể áp dụng cho bất kỳ dự báo nào. Ví dụ:
+- "Các giá trị dự kiến sẽ [thay đổi cụ thể] từ [số cụ thể] đến [số cụ thể], điều này là [ngữ cảnh/lý do cụ thể]"
+- "Mẫu lịch sử cho thấy [mẫu cụ thể với số liệu], gợi ý [thông tin chi tiết cụ thể]"
+- "Dựa trên [hành vi lịch sử cụ thể], người dùng nên [hành động cụ thể liên quan đến dữ liệu dự báo này]"
+Làm cho mỗi điểm có thể hành động và cụ thể cho dữ liệu dự báo thực tế được hiển thị.]
+
+Return ONLY these sections with the exact headers shown above. Do not add any introductory text, conclusions, or additional commentary outside of these sections.`;
 
       // Build context information
       let contextInfo = `Target column being forecasted: "${targetColumn}".`;
@@ -503,10 +500,10 @@ Return ONLY these two paragraphs with the exact headers shown above. Do not add 
         contextInfo += ` Available columns in dataset: ${availableColumns.join(', ')}.`;
       }
 
-      // Add performance metrics to context
+      // Add performance metrics to context (for AI to judge, but NOT to show to users)
       let metricsInfo = '';
       if (testR2 !== undefined && testR2 !== null) {
-        metricsInfo = `\n\nModel Performance Metrics:\n`;
+        metricsInfo = `\n\n[INTERNAL - DO NOT MENTION THESE METRICS TO THE USER] Model Performance Metrics for your analysis:\n`;
         metricsInfo += `- Test R²: ${testR2.toFixed(3)} (measures how well the model explains the data, higher is better, max is 1.0)\n`;
         if (testRMSE !== undefined && testRMSE !== null) {
           metricsInfo += `- Test RMSE: ${testRMSE.toFixed(3)} (average prediction error)\n`;
@@ -515,44 +512,47 @@ Return ONLY these two paragraphs with the exact headers shown above. Do not add 
           metricsInfo += `- Test MAE: ${testMAE.toFixed(3)} (average absolute error)\n`;
         }
         if (testMAPE !== undefined && testMAPE !== null) {
-          metricsInfo += `- Test MAPE: ${testMAPE.toFixed(2)}% (average percentage error)`;
+          metricsInfo += `- Test MAPE: ${testMAPE.toFixed(2)}% (average percentage error)\n`;
         }
+        metricsInfo += `Use these metrics to assess reliability, but translate your assessment into plain language. NEVER mention the actual metric names or values in your response.`;
       }
 
-      const validationWarning = isTimeColumn
-        ? `\n\n⚠️ IMPORTANT: The target column "${targetColumn}" appears to be a TIME/DATE column. Forecasting time/date columns typically doesn't make business sense - you should forecast MEASUREMENT/VALUE columns instead.`
-        : '';
+      const userPrompt = `Analyze this forecast chart and provide insights in the structured format specified.
 
-      // Add specific alternative column suggestions if forecasting a time column
-      const alternativeSuggestions = isTimeColumn && alternativeColumns.length > 0
-        ? `\n\n💡 SUGGESTION: Based on the dataset columns, consider forecasting one of these numeric columns instead: ${alternativeColumns.slice(0, 5).join(', ')}.`
-        : '';
+Context: ${contextInfo}${metricsInfo}
 
-      const userPrompt = `Analyze this forecast chart and provide insights.
+CRITICAL INSTRUCTIONS:
+1. Look carefully at the chart image and extract SPECIFIC STATISTICS:
+   - Actual historical values (numbers, ranges, peaks, lows)
+   - Specific time periods and dates
+   - Forecasted values and predicted ranges
+   - Percentage changes and comparisons
+   - Any visible patterns, cycles, or anomalies
 
-Context: ${contextInfo}${metricsInfo}${validationWarning}${alternativeSuggestions}
+2. Summary Section:
+   - Include actual numbers from the historical data (e.g., "ranging from 50 to 200", "peaked at 180 in Q2 2023")
+   - Mention specific time periods where notable changes occurred
+   - Describe the overall trend with supporting statistics
 
-Write a single, natural paragraph that jumps STRAIGHT INTO INSIGHTS. Do NOT describe what the chart is - the user already knows it's a forecast chart.
+3. Future Outlook Section:
+   - Include specific predicted values from the forecast (e.g., "expected to reach 150 by [date]", "will decrease by approximately 20%")
+   - Explain WHY the forecast predicts this based on the historical patterns visible in the chart
+   - Incorporate reliability assessment naturally based on the performance metrics (translate into plain language, never mention metric names or values)
 
-Focus on:
-- Key observations: highest/lowest values, peaks, drops, overall trend direction
-- Patterns: seasonal cycles, volatility, stability
-- Future outlook: what the forecast predicts (direction, magnitude, uncertainty ranges)
-- Prediction reliability: Based on the performance metrics provided, assess how trustworthy these predictions are and whether users should rely on them for decision-making
-- Business context: what this means and why it matters
-- Concerns: any issues or risks to watch
-- Actions: what to do based on this forecast (considering the reliability level)
+4. Key Takeaways Section:
+   - Each point MUST be specific to THIS forecast's actual data
+   - Reference specific values, patterns, or predictions from the chart
+   - Avoid generic statements like "monitor closely" or "use with caution" without context
+   - Make each point actionable and unique to this particular forecast
 
-IMPORTANT FOR RECOMMENDATIONS:
-- When suggesting alternative columns to forecast, use the ACTUAL COLUMN NAMES from the dataset context above
-- Be specific: reference the exact column names available in their dataset (e.g., "Consider forecasting the 'Sales' column instead" not just "consider forecasting sales")
-- If forecasting a time column, suggest specific numeric columns from their dataset that would be more meaningful to forecast
-- Make recommendations relevant to their actual data, not generic suggestions
+IMPORTANT:
+- Base your reliability assessment on the performance metrics provided, but describe it in plain language (e.g., "predictions should be used with caution" instead of "R² is -0.172")
+- Every statement should include specific statistics or values from the chart
+- Avoid generic advice that could apply to any forecast
+- Explain the reasoning behind predictions based on actual historical patterns
+- Keep each section detailed with specific numbers and data points
 
-CRITICAL: Start immediately with insights. Do NOT begin with "This chart shows..." or "The chart displays..." - jump straight into what the data tells us (e.g., "Temperatures range from X to Y, with a slight downward trend...").
-
-Keep it concise, natural, and actionable. Avoid repetition and technical jargon.
-Return your answer in BOTH English and Vietnamese, using EXACTLY the paragraph format described in the system prompt.`;
+Return your answer in BOTH English and Vietnamese, using EXACTLY the structured format with section headers as described in the system prompt.`;
 
       // Call OpenRouter API with GPT‑4o vision model for forecast analysis
       const modelMessages = [
