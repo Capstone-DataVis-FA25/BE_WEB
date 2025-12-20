@@ -47,7 +47,15 @@ export class SystemGateway implements OnGatewayConnection, OnGatewayDisconnect {
     // Method to broadcast system status to all connected clients
     async broadcastSystemStatus() {
         const status = await this.systemService.getSystemStatus();
-        this.server.emit('systemStatus', status);
+        if (!this.server) {
+            this.logger.warn('Socket server not available — skipping broadcast');
+            return;
+        }
+        try {
+            this.server.emit('systemStatus', status);
+        } catch (err) {
+            this.logger.error('Failed to broadcast system status', err);
+        }
     }
 
     // Get the number of connected clients

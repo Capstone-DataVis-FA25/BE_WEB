@@ -7,7 +7,7 @@ export class EmailService {
   constructor(
     private readonly mailerService: MailerService,
     private readonly configService: ConfigService
-  ) {}
+  ) { }
 
   async sendResetPasswordEmail(email: string, resetToken: string) {
     const resetUrl = `${process.env.CLIENT_URL}/auth/reset-password?token=${resetToken}`;
@@ -41,5 +41,22 @@ export class EmailService {
         link: verifyUrl,
       },
     });
+  }
+
+  // Generic helper to send template-based emails
+  async sendTemplateMail(to: string, subject: string, template: string, context: any = {}) {
+    const mailOptions = {
+      to,
+      subject,
+      template,
+      context,
+    };
+
+    try {
+      await this.mailerService.sendMail(mailOptions);
+    } catch (err) {
+      // rethrow so callers can handle/log
+      throw err;
+    }
   }
 }
