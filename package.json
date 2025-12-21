@@ -23,6 +23,8 @@
     "prisma:deploy": "prisma migrate deploy",
     "prisma:studio": "prisma studio",
     "prisma:reset": "prisma migrate reset"
+    ,
+    "run:resource-warning": "ts-node -r tsconfig-paths/register scripts/run-resource-warning.ts"
   },
   "dependencies": {
     "@aws-sdk/client-kms": "^3.891.0",
