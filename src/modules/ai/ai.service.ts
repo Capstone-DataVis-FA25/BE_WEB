@@ -157,6 +157,53 @@ IMPORTANT: Speak naturally about UI elements users can see. DON'T expose technic
     return raw?.trim() || '';
   }
 
+  /** ========================= INTENT DETECTION ========================= */
+  async detectIntent(message: string): Promise<'create_chart' | 'list_datasets' | 'clean_data' | 'general_chat'> {
+    if (!this.apiKey) return 'general_chat';
+
+    const systemPrompt = `You are an intent classifier for a data visualization app.
+    Classify the user's message into one of these categories:
+    - "create_chart": User wants to visualize data, draw a chart, plot a graph.
+    - "list_datasets": User wants to see their available datasets, list files, check data.
+    - "clean_data": User wants to clean, format, or process data.
+    - "general_chat": Any other casual conversation, questions about how to use, or unclear intents.
+
+    Do not answer the user's question. ONLY return the category name.`;
+
+    const modelMessages = [
+      { role: 'system', content: systemPrompt },
+      { role: 'user', content: message }
+    ];
+
+    try {
+      const res = await fetch(`${this.baseUrl}/chat/completions`, {
+        method: 'POST',
+        headers: this.getCommonHeaders(this.apiKey),
+        body: JSON.stringify({
+          model: this.model,
+          messages: modelMessages,
+          temperature: 0,
+          max_tokens: 10
+        }),
+      });
+
+      if (!res.ok) return 'general_chat';
+
+      const data = await res.json();
+      const intent = data?.choices?.[0]?.message?.content?.trim()?.toLowerCase();
+
+      this.logger.log(`[detectIntent] Message: "${message}" -> Intent: ${intent}`);
+
+      if (['create_chart', 'list_datasets', 'clean_data'].includes(intent)) {
+        return intent as any;
+      }
+      return 'general_chat';
+    } catch (e) {
+      this.logger.error(`[detectIntent] Error: ${e.message}`);
+      return 'general_chat';
+    }
+  }
+
   /** ========================= CSV CLEAN ========================= */
   private estimateTokens(text: string) {
     return Math.ceil((text?.length || 0) / 4);

@@ -75,13 +75,14 @@ export class AiController {
       // Extract userId from JWT token (guaranteed by JwtAccessTokenGuard)
       const userId = req.user?.userId || req.user?.id;
 
-      // Check if user is asking to create a chart
-      const isChartRequest = this.isChartGenerationRequest(body.message);
-      // Check if user wants to see dataset list
-      const wantsDatasetList = this.isDatasetListRequest(body.message);
+      // Detect intent using LLM
+      const intent = await this.aiService.detectIntent(body.message);
+      const isChartRequest = intent === 'create_chart';
+      const wantsDatasetList = intent === 'list_datasets';
 
       // Debug log
       console.log("[DEBUG] Chat message:", body.message);
+      console.log("[DEBUG] Detected Intent:", intent);
       console.log("[DEBUG] Is chart request:", isChartRequest);
       console.log("[DEBUG] Wants dataset list:", wantsDatasetList);
       console.log("[DEBUG] Has datasetId:", !!body.datasetId);
@@ -126,14 +127,12 @@ export class AiController {
       }
 
       // Regular chat
-      console.log("[DEBUG] Route: Regular chat");
       const result = await this.aiService.chatWithAi(
         body.message,
         body.messages,
         body.language
       );
       return result;
-      return await this.aiService.chatWithAi(body.message, body.messages, body.language);
     } catch (e: any) {
       throw new HttpException(
         { success: false, message: e.message },
@@ -142,117 +141,7 @@ export class AiController {
     }
   }
 
-  private isChartGenerationRequest(message: string): boolean {
-    const lowerMsg = message.toLowerCase().trim();
 
-    console.log("[DEBUG isChartGenerationRequest] Input message:", message);
-    console.log("[DEBUG isChartGenerationRequest] Lowercased:", lowerMsg);
-
-    // Positive keywords - intent to CREATE chart
-    const createIntents = [
-      "tạo biểu đồ",
-      "tạo chart",
-      "vẽ biểu đồ",
-      "vẽ chart",
-      "tạo một biểu đồ",
-      "tạo một chart",
-      "create chart",
-      "generate chart",
-      "make chart",
-      "draw chart",
-      "create a chart",
-      "make a chart",
-      "generate a chart",
-      "draw a chart",
-    ];
-
-    // Check if message starts with create intent or contains it
-    const hasCreateIntent = createIntents.some((intent) => {
-      const matches = lowerMsg.includes(intent);
-      if (matches) {
-        console.log("[DEBUG isChartGenerationRequest] Matched intent:", intent);
-      }
-      return matches;
-    });
-
-    // Negative keywords - NOT a chart creation request
-    const negativePatterns = [
-      "là gì",
-      "what is",
-      "giải thích",
-      "explain",
-      "hướng dẫn",
-      "guide",
-      "cách",
-      "how to",
-      "thế nào",
-      "?", // Questions typically not creation requests
-    ];
-
-    // If message is a question about charts, NOT a creation request
-    const isQuestion = negativePatterns.some((pattern) => {
-      const matches = lowerMsg.includes(pattern);
-      if (matches) {
-        console.log(
-          "[DEBUG isChartGenerationRequest] Matched negative pattern:",
-          pattern
-        );
-      }
-      return matches;
-    });
-
-    const result = hasCreateIntent && !isQuestion;
-    console.log(
-      "[DEBUG isChartGenerationRequest] hasCreateIntent:",
-      hasCreateIntent
-    );
-    console.log("[DEBUG isChartGenerationRequest] isQuestion:", isQuestion);
-    console.log("[DEBUG isChartGenerationRequest] Final result:", result);
-
-    return result;
-  }
-
-  private isDatasetListRequest(message: string): boolean {
-    const lowerMsg = message.toLowerCase().trim();
-
-    const listKeywords = [
-      // Vietnamese dataset keywords
-      "dataset đâu",
-      "dataset nào",
-      "có dataset",
-      "dataset gì",
-      "danh sách dataset",
-      "xem dataset",
-      "hiển thị dataset",
-      "có những dataset",
-      "các dataset",
-      "dữ liệu nào",
-      "xem dữ liệu",
-      "có dữ liệu",
-      "danh sách dữ liệu",
-      "list",
-      "danh sách",
-      "show dataset",
-      "list dataset",
-      "my dataset",
-      "available dataset",
-      "show data",
-      "list data",
-      "my data",
-      "what dataset",
-      "which dataset",
-
-      // Simple confirmations (when AI asks to show list)
-      "yes",
-      "ok",
-      "okay",
-      "có",
-      "được",
-      "list",
-    ];
-
-    return listKeywords.some((keyword) => lowerMsg.includes(keyword));
-  }
 
   private async getUserDatasets(userId: string) {
     // Use DatasetsService to get user's datasets
@@ -355,11 +244,15 @@ export class AiController {
       });
 
       // Create chart in database with AI-generated config
+      const chartName = result.suggestedName || result.config.title || "AI Generated Chart";
+      // Format: [Type] - [Name] (e.g., "Line - Monthly Sales")
+      const formattedName = `${result.type.charAt(0).toUpperCase() + result.type.slice(1)} - ${chartName}`;
+
       const createdChart = await this.prismaService.prisma.chart.create({
         data: {
           userId,
           datasetId,
-          name: result.suggestedName || result.config.title || "AI Generated Chart",
+          name: formattedName,
           description: `AI-generated ${result.type} chart`,
           type: result.type,
           config: result.config,

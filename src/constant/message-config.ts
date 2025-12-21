@@ -31,4 +31,6 @@ export const Messages = {
   FILE_SIZE_LIMIT_EXCEEDED: "You have exceeded the maximum file size allowed for your subscription plan",
   AI_REQUEST_LIMIT_EXCEEDED: "You have exceeded the maximum number of AI requests allowed for your subscription plan",
   NO_SUBSCRIPTION_PLAN: "No subscription plan found for your account",
+  // ChatBox
+  ERROR_EXECUTE_RESPONSE: "Sorry, i can't execute your request right now!"
 };
