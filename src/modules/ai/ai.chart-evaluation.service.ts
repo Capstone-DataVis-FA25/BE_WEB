@@ -36,7 +36,11 @@ export class AiChartEvaluationService {
     };
   }
 
-  private async postChat(body: any, tag?: string, maxAttempts: number = 3): Promise<any> {
+  private async postChat(
+    body: any,
+    tag?: string,
+    maxAttempts: number = 3
+  ): Promise<any> {
     const url = `${this.baseUrl}/chat/completions`;
     let lastErr: any = null;
 
@@ -203,7 +207,7 @@ export class AiChartEvaluationService {
         : decryptedHeaders.map((h: any) => h.name);
 
     this.logger.debug(
-      `[evaluateChart] Selected columns from frontend: ${selectedColumns.join(', ')}`
+      `[evaluateChart] Selected columns from frontend: ${selectedColumns.join(", ")}`
     );
 
     const datasetInfo = {
@@ -238,7 +242,7 @@ export class AiChartEvaluationService {
 
   <strong>Chart Context:</strong>
   - Chart Type: ${chart.type}
-  - Columns selected for this chart: <strong>${selectedColumns.join(', ')}</strong>
+  - Columns selected for this chart: <strong>${selectedColumns.join(", ")}</strong>
 
   <strong>Dataset Information (no sample rows provided):</strong>
   - Total Rows: ${datasetInfo.totalRows}
@@ -313,6 +317,7 @@ Your entire response must be written 100% in ${language}, and you are NOT allowe
     this.logger.debug(`[evaluateChart] User prompt: ${userPrompt}`);
 
     const body = {
+      model: "openai/gpt-4o", // Use GPT-4o vision model
       messages: modelMessages,
       temperature: 0.7,
       max_tokens: 3000, // Increased for comprehensive analysis
@@ -352,7 +357,7 @@ Your entire response must be written 100% in ${language}, and you are NOT allowe
   async analyzeForecastChart(
     forecastId: string,
     chartImageUrl: string,
-    maxAttempts: number = 3,
+    maxAttempts: number = 3
   ): Promise<string | null> {
     const start = Date.now();
     this.logger.log(
@@ -360,13 +365,15 @@ Your entire response must be written 100% in ${language}, and you are NOT allowe
     );
 
     if (!this.apiKey) {
-      this.logger.warn("OPENROUTER_API_KEY is not configured, skipping analysis");
+      this.logger.warn(
+        "OPENROUTER_API_KEY is not configured, skipping analysis"
+      );
       return null;
     }
 
     try {
       // Remove leading slash and resolve path
-      const imagePath = chartImageUrl.startsWith('/')
+      const imagePath = chartImageUrl.startsWith("/")
         ? chartImageUrl.substring(1)
         : chartImageUrl;
 
@@ -376,24 +383,36 @@ Your entire response must be written 100% in ${language}, and you are NOT allowe
       // assuming the Nest app is started from the BE_WEB project root.
       const projectRoot = process.cwd();
 
-      const fullImagePath = path.join(projectRoot, 'public', imagePath);
+      const fullImagePath = path.join(projectRoot, "public", imagePath);
 
-      this.logger.log(`[analyzeForecastChart] Looking for image at: ${fullImagePath}`);
-      this.logger.log(`[analyzeForecastChart] Image exists: ${fs.existsSync(fullImagePath)}`);
+      this.logger.log(
+        `[analyzeForecastChart] Looking for image at: ${fullImagePath}`
+      );
+      this.logger.log(
+        `[analyzeForecastChart] Image exists: ${fs.existsSync(fullImagePath)}`
+      );
 
       if (!fs.existsSync(fullImagePath)) {
-        this.logger.warn(`[analyzeForecastChart] Image not found at: ${fullImagePath}`);
-        this.logger.warn(`[analyzeForecastChart] Chart image URL: ${chartImageUrl}`);
+        this.logger.warn(
+          `[analyzeForecastChart] Image not found at: ${fullImagePath}`
+        );
+        this.logger.warn(
+          `[analyzeForecastChart] Chart image URL: ${chartImageUrl}`
+        );
         return null;
       }
 
       // Read image file and convert to base64
       const imageBuffer = fs.readFileSync(fullImagePath);
-      const base64Image = imageBuffer.toString('base64');
+      const base64Image = imageBuffer.toString("base64");
       const imageDataUrl = `data:image/png;base64,${base64Image}`;
 
-      this.logger.log(`[analyzeForecastChart] Image loaded, size: ${imageBuffer.length} bytes`);
-      this.logger.log(`[analyzeForecastChart] Base64 length: ${base64Image.length} chars`);
+      this.logger.log(
+        `[analyzeForecastChart] Image loaded, size: ${imageBuffer.length} bytes`
+      );
+      this.logger.log(
+        `[analyzeForecastChart] Base64 length: ${base64Image.length} chars`
+      );
 
       // Fetch forecast with dataset information to get context
       const forecast = await this.prismaService.prisma.forecast.findUnique({
@@ -409,7 +428,7 @@ Your entire response must be written 100% in ${language}, and you are NOT allowe
         },
       });
 
-      const targetColumn = forecast?.targetColumn || 'the metric';
+      const targetColumn = forecast?.targetColumn || "the metric";
       const forecastName = forecast?.name || null;
       const datasetName = forecast?.dataset?.name || null;
 
@@ -497,7 +516,7 @@ Return ONLY these sections with the exact headers shown above. Do not add any in
         contextInfo += ` Dataset: "${datasetName}".`;
       }
       if (availableColumns.length > 0) {
-        contextInfo += ` Available columns in dataset: ${availableColumns.join(', ')}.`;
+        contextInfo += ` Available columns in dataset: ${availableColumns.join(", ")}.`;
       }
 
       // Add performance metrics to context (for AI to judge, but NOT to show to users)
@@ -587,11 +606,13 @@ Return your answer in BOTH English and Vietnamese, using EXACTLY the structured 
       this.logger.log(
         `[analyzeForecastChart] Sending image (base64 length: ${imageDataUrl.length}) and prompt to model...`
       );
-      this.logger.log(
-        `[analyzeForecastChart] Max attempts: ${maxAttempts}`
-      );
+      this.logger.log(`[analyzeForecastChart] Max attempts: ${maxAttempts}`);
 
-      const resData = await this.postChat(body, "analyzeForecastChart", maxAttempts);
+      const resData = await this.postChat(
+        body,
+        "analyzeForecastChart",
+        maxAttempts
+      );
 
       // Extract and clean response
       const rawContent = this.extractAiContent(resData);
@@ -599,11 +620,17 @@ Return your answer in BOTH English and Vietnamese, using EXACTLY the structured 
       const elapsed = Date.now() - start;
 
       this.logger.log(`[analyzeForecastChart] Completed in ${elapsed}ms`);
-      this.logger.log(`[analyzeForecastChart] Analysis length: ${cleanedContent.length} chars`);
-      this.logger.debug(`[analyzeForecastChart] Analysis preview: ${cleanedContent.substring(0, 200)}...`);
+      this.logger.log(
+        `[analyzeForecastChart] Analysis length: ${cleanedContent.length} chars`
+      );
+      this.logger.debug(
+        `[analyzeForecastChart] Analysis preview: ${cleanedContent.substring(0, 200)}...`
+      );
 
       if (!cleanedContent || cleanedContent.length === 0) {
-        this.logger.warn(`[analyzeForecastChart] Received empty analysis from Gemini`);
+        this.logger.warn(
+          `[analyzeForecastChart] Received empty analysis from Gemini`
+        );
         return null;
       }
 
