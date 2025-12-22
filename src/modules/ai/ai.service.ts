@@ -1216,7 +1216,13 @@ Generate a chart configuration that best matches this request.`;
     }
 
     const scriptDir = path.dirname(scriptPath);
-    const venvPythonPath = path.resolve(projectRoot, 'venv_tf', 'Scripts', 'python.exe');
+    // Tự động nhận diện OS để chọn python venv đúng
+    const isWin = process.platform === 'win32';
+    const venvPythonPath = path.resolve(
+      projectRoot,
+      'venv_tf',
+      isWin ? 'Scripts/python.exe' : 'bin/python'
+    );
 
     // Log paths for debugging
     this.logger.debug(`[forecast] Script dir: ${scriptDir}`);
