@@ -138,7 +138,14 @@ else:
         print(f"   💡 Available numeric columns: {numeric_cols}")
 
 # 📋 FEATURE SELECTION (optional)
-feature_columns = []
+# Allow frontend/backend to pass feature columns via environment, e.g.
+# FEATURE_COLUMNS="Online,Retail,Net,Gross"
+feature_columns_env = os.getenv('FEATURE_COLUMNS')
+if feature_columns_env:
+    feature_columns = [c.strip()
+                       for c in feature_columns_env.split(',') if c.strip()]
+else:
+    feature_columns = []
 
 # 🔮 FORECAST CONFIGURATION (required)
 forecast_window_raw = os.getenv('FORECAST_WINDOW')
@@ -168,6 +175,12 @@ print(f"✅ Target column '{target_column}' found in dataset")
 print("\n🔧 Feature selection:")
 original_feature_count = len(feature_columns)
 feature_columns = [c for c in feature_columns if c in df.columns]
+if original_feature_count > 0 and len(feature_columns) == 0:
+    print("   ⚠️  None of the requested feature columns exist in the dataset")
+elif original_feature_count > len(feature_columns):
+    missing = set(feature_columns) - set(df.columns)
+    print(
+        f"   ⚠️  Some requested feature columns are missing and will be ignored: {list(missing)}")
 print(
     f"   Using {len(feature_columns)} feature columns (original list size: {original_feature_count})")
 
@@ -220,11 +233,35 @@ if len(df) == 0:
 df = df.fillna(method='ffill').fillna(method='bfill')
 print(f"   🔍 Debug: After ffill/bfill, df shape: {df.shape}")
 
+# 🔧 Robustify target a bit: clip extreme outliers so that a few very
+# large values do not dominate the loss and R², which is especially
+# important for tiny datasets like this sample (36 rows).
+q1 = df[target_column].quantile(0.25)
+q3 = df[target_column].quantile(0.75)
+iqr = q3 - q1
+if iqr > 0:
+    lower_bound = q1 - 1.5 * iqr
+    upper_bound = q3 + 1.5 * iqr
+    before_clip_min, before_clip_max = df[target_column].min(), df[target_column].max()
+    df[target_column] = df[target_column].clip(lower_bound, upper_bound)
+    after_clip_min, after_clip_max = df[target_column].min(), df[target_column].max()
+    if before_clip_min != after_clip_min or before_clip_max != after_clip_max:
+        print(f"   🔍 Target clipping applied: [{before_clip_min}, {before_clip_max}] -> [{after_clip_min}, {after_clip_max}]")
+
 # 🔄 RE-EVALUATE TYPES: Now that data is clean, split features
-# If no feature columns provided, use target column itself (univariate time series)
+# If no feature columns provided, automatically use all numeric
+# columns (except the target) plus the target itself.
 if len(feature_columns) == 0:
-    print("   ℹ️  No feature columns provided, using target column as feature (univariate forecasting)")
-    feature_columns = [target_column]
+    auto_numeric_features = [
+        c for c in df.columns
+        if c != target_column and pd.api.types.is_numeric_dtype(df[c])
+    ]
+    if len(auto_numeric_features) == 0:
+        print("   ℹ️  No feature columns provided and no extra numeric columns found; using target column as feature (univariate forecasting)")
+        feature_columns = [target_column]
+    else:
+        feature_columns = auto_numeric_features + [target_column]
+        print("   ℹ️  No feature columns provided; auto-selected numeric feature set:", feature_columns)
 
 numeric_features = [
     c for c in feature_columns if pd.api.types.is_numeric_dtype(df[c])]
@@ -272,6 +309,17 @@ else:
     X = pd.concat([X_numeric, df_encoded], axis=1)
 
 print(f"   🔍 Debug: Final X shape: {X.shape}")
+
+# Remember index of target column inside feature matrix (if present).
+# This is later used to update the autoregressive target value during
+# multi-step forecasting so that each future step conditions on the
+# previous prediction instead of repeating the last real observation.
+target_in_X_index = None
+if target_column in X.columns:
+    target_in_X_index = X.columns.get_loc(target_column)
+    print(f"   🔍 Target column position in X: {target_in_X_index}")
+else:
+    print("   ℹ️  Target column is not part of feature matrix X")
 
 # 🛡️ VALIDATE: Check if we have data after processing
 if len(df) == 0:
@@ -328,7 +376,7 @@ initial_samples = len(y_scaled) - SEQ_LEN
 # Adaptive augmentation
 if initial_samples < 100:
     print("⚠️  Very small dataset detected (<100 samples)")
-    print("   Using stride=1 for maximum sequences...")
+    print("   Using stride=1 for maximum sequences (no skipping)...")
     stride = 1
     X_seq, y_seq = create_sequences_with_stride(
         X_scaled, y_scaled, SEQ_LEN, stride=stride)
@@ -337,16 +385,16 @@ if initial_samples < 100:
         f"   ✓ Created {len(X_seq)} sequences from {initial_samples} samples")
 elif initial_samples < 300:
     print("📊 Small dataset detected (<300 samples)")
-    print("   Using stride=3 for data augmentation...")
-    stride = 3
+    print("   Using stride=1 to keep as much temporal information as possible...")
+    stride = 1
     X_seq, y_seq = create_sequences_with_stride(
         X_scaled, y_scaled, SEQ_LEN, stride=stride)
     data_was_augmented = True
     print(
         f"   ✓ Created {len(X_seq)} sequences from {initial_samples} samples")
 else:
-    print("✅ Sufficient data, using standard approach")
-    # ⚡ FIX: Use ALL data (sliding window of 1) to get maximum samples
+    print("✅ Sufficient data, using dense sliding window (stride=1)")
+    # Use ALL data (sliding window of 1) to get maximum samples
     stride = 1
     X_seq, y_seq = create_sequences_with_stride(
         X_scaled, y_scaled, SEQ_LEN, stride=stride)
@@ -426,19 +474,20 @@ else:
     input_shape = (X_train_seq.shape[1], X_train_seq.shape[2])
 
     if len(X_train_seq) < 150:
-        print("   → Using SIMPLIFIED architecture")
-        lstm_units = 16
-        dropout_rate = 0.25
+        print("   → Using SIMPLIFIED but DEEPER architecture")
+        # More units and slightly lower dropout to reduce underfitting
+        lstm_units = 32
+        dropout_rate = 0.15
         use_two_layers = False
-    elif len(X_train_seq) < 300:
+    elif len(X_train_seq) < 400:
         print("   → Using MODERATE architecture")
-        lstm_units = 24
-        dropout_rate = 0.2
+        lstm_units = 48
+        dropout_rate = 0.15
         use_two_layers = False
     else:
-        print("   → Using STANDARD architecture")
-        lstm_units_1 = 32
-        lstm_units_2 = 16
+        print("   → Using STANDARD two-layer architecture")
+        lstm_units_1 = 64
+        lstm_units_2 = 32
         dropout_rate = 0.2
         use_two_layers = True
 
@@ -457,11 +506,12 @@ else:
     # ⚡ OPTIMIZATIONS:
     # 1. Higher LR (0.002) for stability (0.005 was too jumpy)
     # 2. Lower Patience (no need to wait forever)
-    model.compile(optimizer=Adam(learning_rate=0.002), loss="mae")
+    # Slightly lower learning rate for more stable convergence
+    model.compile(optimizer=Adam(learning_rate=0.0015), loss="mae")
 
     early_stop = EarlyStopping(
         monitor='val_loss',
-        patience=15,  # Give it time to find the "Wavy" pattern
+        patience=20,  # Give it more time to learn complex patterns
         restore_best_weights=True,
         verbose=1
     )
@@ -469,12 +519,13 @@ else:
     reduce_lr = ReduceLROnPlateau(
         monitor='val_loss',
         factor=0.5,
-        patience=5,
+        patience=7,
         min_lr=1e-5,
         verbose=1
     )
 
-    epochs = 60  # Fixed epochs (High enough to learn seasons)
+    # Upper bound on epochs; early stopping will usually stop earlier
+    epochs = 80
     batch_size = max(32, len(X_train_seq) // 20)  # Larger batches for speed
 
     print(f"   Training: epochs={epochs}, batch_size={batch_size}")
@@ -650,7 +701,14 @@ for step in range(1, FORECAST_WINDOW + 1):
     # 2. Create new row base (copy of last known state)
     new_row_scaled = last_seq[-1, :].copy()
 
-    # 3. Slide window forward with the new prediction context
+    # 3. Inject the newly predicted target value into the feature
+    #    vector when the target is part of X. This makes the
+    #    multi-step forecast auto-regressive instead of simply
+    #    repeating the last observed target.
+    if target_in_X_index is not None:
+        new_row_scaled[target_in_X_index] = pred_scaled
+
+    # 4. Slide window forward with the new prediction context
     last_seq = np.vstack([last_seq[1:], new_row_scaled])
 
 future_preds = scaler_y.inverse_transform(
