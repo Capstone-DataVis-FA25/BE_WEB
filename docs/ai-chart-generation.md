@@ -33,7 +33,7 @@ interface ChatAIResponse {
 
 ```json
 {
-  "reply": "📊 **Chọn dataset để tạo biểu đồ**\n\nBạn có 3 datasets:\n\n1. **Sales Data 2024** - Monthly sales data\n2. **Customer Analytics** - Customer behavior analysis\n3. **Revenue Report** - Q1-Q4 revenue summary",
+  "reply": "**Chọn dataset để tạo biểu đồ**\n\nBạn có 3 datasets:\n\n1. **Sales Data 2024** - Monthly sales data\n2. **Customer Analytics** - Customer behavior analysis\n3. **Revenue Report** - Q1-Q4 revenue summary",
   "success": true,
   "needsDatasetSelection": true,
   "datasets": [
@@ -81,16 +81,15 @@ interface ChartGeneratedResponse {
 
 ```json
 {
-  "reply": "✅ **Đã tạo biểu đồ thành công!**\n\n📊 **Biểu đồ doanh thu theo tháng**\n\nTôi đã tạo biểu đồ line chart...\n\n🔗 [**Mở Chart Editor →**](/workspace/charts/editor?config=...)",
+  "reply": "✅ **Đã tạo biểu đồ thành công!**\n\n **Biểu đồ doanh thu theo tháng**\n\nTôi đã tạo biểu đồ line chart...\n\n [**Mở Chart Editor →**](/workspace/charts/editor?config=...)",
   "success": true,
   "chartGenerated": true,
   "chartData": {
     "type": "line",
     "config": {
-      /* full config */
     },
     "explanation": "Tôi đã tạo line chart với...",
-    "suggestedName": "Biểu đồ doanh thu theo tháng",
+    "suggestedName": "Line - Biểu đồ doanh thu theo tháng",
     "chartUrl": "/workspace/charts/editor?config=eyJ0eXBlIjoibGluZSI..."
   }
 }
@@ -333,7 +332,7 @@ curl -X POST http://localhost:3000/api/ai/generate-chart-config \
       "showPoints": true
     },
     "explanation": "I created a line chart with months on X-axis and revenue on Y-axis. Dark theme and smooth curves applied as requested.",
-    "suggestedName": "Revenue by Month Analysis",
+    "suggestedName": "Line - Revenue by Month Analysis",
     "chartUrl": "/workspace/charts/editor?config=eyJ0eXBlIjoibGluZSIsImNvbmZpZyI6eyJ0aXRsZSI6IlJldmVudWUgYnkgTW9udGgiLCJ3aWR0aCI6ODAwLCJoZWlnaHQiOjQwMCwibWFyZ2luIjp7InRvcCI6MjAsImxlZnQiOjUwLCJyaWdodCI6MzAsImJvdHRvbSI6NDB9LCJ0aGVtZSI6ImRhcmsiLCJ4QXhpc0tleSI6ImNtZnAweG05djAwMDIxOTNndDJ2bW55ZjUiLCJ5QXhpc0tleXMiOlsiY21mcDB4bTl2MDAwMzE5M2c5NzF5enVjZyJdLCJ4QXhpc0xhYmVsIjoiTW9udGgiLCJ5QXhpc0xhYmVsIjoiUmV2ZW51ZSIsInNob3dMZWdlbmQiOnRydWUsInNob3dHcmlkIjp0cnVlLCJzaG93VG9vbHRpcCI6dHJ1ZSwiYW5pbWF0aW9uRHVyYXRpb24iOjEwMDAsImxpbmVUeXBlIjoic21vb3RoIiwic2hvd1BvaW50cyI6dHJ1ZX0sIm5hbWUiOiJSZXZlbnVlIGJ5IE1vbnRoIEFuYWx5c2lzIiwiZGF0YXNldElkIjoiY21mcDB4bTl2MDAwMTE5M2d0MnZtbnlmNCJ9",
     "success": true
   }

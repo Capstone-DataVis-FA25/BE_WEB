@@ -72,69 +72,82 @@ export class AiController {
         HttpStatus.BAD_REQUEST
       );
     try {
-      // Extract userId from JWT token (guaranteed by JwtAccessTokenGuard)
       const userId = req.user?.userId || req.user?.id;
 
-      // Check if user is asking to create a chart
-      const isChartRequest = this.isChartGenerationRequest(body.message);
-      // Check if user wants to see dataset list
-      const wantsDatasetList = this.isDatasetListRequest(body.message);
-
-      // Debug log
-      console.log("[DEBUG] Chat message:", body.message);
-      console.log("[DEBUG] Is chart request:", isChartRequest);
-      console.log("[DEBUG] Wants dataset list:", wantsDatasetList);
-      console.log("[DEBUG] Has datasetId:", !!body.datasetId);
-      console.log("[DEBUG] UserId:", userId);
-
-      if (isChartRequest && body.datasetId && userId) {
-        // User wants to create chart AND has dataset
-
-        // NEW: Check if chartType is already selected
-        if (!body.chartType) {
-          console.log("[DEBUG] Route: Ask for chart type preference");
-          return {
-            reply: "Bạn muốn tôi tự động chọn loại biểu đồ phù hợp hay bạn muốn tự chọn loại biểu đồ cụ thể?",
-            success: true,
-            needsChartTypeSelection: true, // Trigger UI for chart type selection
-            datasetId: body.datasetId, // Keep dataset context
-            originalMessage: body.message // Keep original prompt context
-          };
-        }
-
-        // Generate directly with specific or auto chart type
-        console.log("[DEBUG] Route: Generate chart directly with type:", body.chartType);
-        const result = await this.handleChartGeneration(
-          body.message,
-          body.datasetId,
-          userId,
-          body.chartType
-        );
-        return result;
-      } else if (isChartRequest && userId) {
-        console.log("[DEBUG] Route: Auto-fetch datasets for chart creation");
-        const datasets = await this.getUserDatasets(userId);
-        console.log("[DEBUG] Found datasets:", datasets.length);
-        const result = await this.handleChartRequestWithoutDataset(body.message, datasets);
-        return result;
-      } else if (wantsDatasetList && userId) {
-        console.log("[DEBUG] Route: Show dataset list");
-        const datasets = await this.getUserDatasets(userId);
-        console.log("[DEBUG] Found datasets:", datasets.length);
-        const result = await this.showDatasetList(datasets);
-        return result;
-      }
-
-      // Regular chat
-      console.log("[DEBUG] Route: Regular chat");
-      const result = await this.aiService.chatWithAi(
+      // Call the Agentic Service
+      const agentResult = await this.aiService.processUserRequest(
+        userId,
         body.message,
         body.messages,
         body.language
       );
-      return result;
-      return await this.aiService.chatWithAi(body.message, body.messages, body.language);
+
+      console.log("[DEBUG] Agent Action:", agentResult.action);
+      console.log("[DEBUG] Agent Params:", agentResult.params);
+
+      // --- HANDLE AGENT ACTIONS ---
+
+      // 1. CREATE CHART
+      if (agentResult.action === 'create_chart') {
+        const params = agentResult.params || {};
+
+        // If we have a dataset context, proceed to generation
+        if (body.datasetId) {
+          const specificTypeFromAgent = params.chartType && params.chartType !== 'auto' ? params.chartType : null;
+          const effectiveChartType = specificTypeFromAgent || body.chartType;
+
+          // If no specific type selected/detected, ask user to select
+          if (!effectiveChartType) {
+            return {
+              reply: "Bạn muốn tôi tự động chọn loại biểu đồ phù hợp hay bạn muốn tự chọn loại biểu đồ cụ thể?",
+              success: true,
+              needsChartTypeSelection: true,
+              datasetId: body.datasetId,
+              originalMessage: body.message
+            };
+          }
+
+          return await this.handleChartGeneration(
+            params.description || body.message,
+            body.datasetId,
+            userId,
+            effectiveChartType
+          );
+        } else {
+          // No dataset selected -> Show list
+          const datasets = await this.getUserDatasets(userId);
+          return await this.handleChartRequestWithoutDataset(body.message, datasets);
+        }
+      }
+
+      // 2. LIST DATASETS
+      if (agentResult.action === 'list_datasets') {
+        const datasets = await this.getUserDatasets(userId);
+        return await this.showDatasetList(datasets);
+      }
+
+      // 3. CLEAN DATA (Suggestion)
+      if (agentResult.action === 'clean_data') {
+        // Return a text reply (if any) plus an action flag for the UI to maybe open a modal?
+        // For now, just return specific text helper + action flag
+        return {
+          reply: agentResult.reply || "Tôi có thể giúp bạn làm sạch dữ liệu. Hãy tải lên file CSV/Excel hoặc chọn một dataset.",
+          success: true,
+          action: 'clean_data', // Frontend might react to this
+        };
+      }
+
+      // 4. DOCUMENTATION / GENERAL CHAT
+      // Returning the text response directly
+      return {
+        reply: agentResult.reply,
+        success: true,
+        action: agentResult.action || 'general_chat',
+        processingTime: agentResult.processingTime
+      };
+
     } catch (e: any) {
+      console.error("[AiController] Error:", e);
       throw new HttpException(
         { success: false, message: e.message },
         HttpStatus.INTERNAL_SERVER_ERROR
@@ -142,117 +155,7 @@ export class AiController {
     }
   }
 
-  private isChartGenerationRequest(message: string): boolean {
-    const lowerMsg = message.toLowerCase().trim();
 
-    console.log("[DEBUG isChartGenerationRequest] Input message:", message);
-    console.log("[DEBUG isChartGenerationRequest] Lowercased:", lowerMsg);
-
-    // Positive keywords - intent to CREATE chart
-    const createIntents = [
-      "tạo biểu đồ",
-      "tạo chart",
-      "vẽ biểu đồ",
-      "vẽ chart",
-      "tạo một biểu đồ",
-      "tạo một chart",
-      "create chart",
-      "generate chart",
-      "make chart",
-      "draw chart",
-      "create a chart",
-      "make a chart",
-      "generate a chart",
-      "draw a chart",
-    ];
-
-    // Check if message starts with create intent or contains it
-    const hasCreateIntent = createIntents.some((intent) => {
-      const matches = lowerMsg.includes(intent);
-      if (matches) {
-        console.log("[DEBUG isChartGenerationRequest] Matched intent:", intent);
-      }
-      return matches;
-    });
-
-    // Negative keywords - NOT a chart creation request
-    const negativePatterns = [
-      "là gì",
-      "what is",
-      "giải thích",
-      "explain",
-      "hướng dẫn",
-      "guide",
-      "cách",
-      "how to",
-      "thế nào",
-      "?", // Questions typically not creation requests
-    ];
-
-    // If message is a question about charts, NOT a creation request
-    const isQuestion = negativePatterns.some((pattern) => {
-      const matches = lowerMsg.includes(pattern);
-      if (matches) {
-        console.log(
-          "[DEBUG isChartGenerationRequest] Matched negative pattern:",
-          pattern
-        );
-      }
-      return matches;
-    });
-
-    const result = hasCreateIntent && !isQuestion;
-    console.log(
-      "[DEBUG isChartGenerationRequest] hasCreateIntent:",
-      hasCreateIntent
-    );
-    console.log("[DEBUG isChartGenerationRequest] isQuestion:", isQuestion);
-    console.log("[DEBUG isChartGenerationRequest] Final result:", result);
-
-    return result;
-  }
-
-  private isDatasetListRequest(message: string): boolean {
-    const lowerMsg = message.toLowerCase().trim();
-
-    const listKeywords = [
-      // Vietnamese dataset keywords
-      "dataset đâu",
-      "dataset nào",
-      "có dataset",
-      "dataset gì",
-      "danh sách dataset",
-      "xem dataset",
-      "hiển thị dataset",
-      "có những dataset",
-      "các dataset",
-      "dữ liệu nào",
-      "xem dữ liệu",
-      "có dữ liệu",
-      "danh sách dữ liệu",
-      "list",
-      "danh sách",
-      "show dataset",
-      "list dataset",
-      "my dataset",
-      "available dataset",
-      "show data",
-      "list data",
-      "my data",
-      "what dataset",
-      "which dataset",
-
-      // Simple confirmations (when AI asks to show list)
-      "yes",
-      "ok",
-      "okay",
-      "có",
-      "được",
-      "list",
-    ];
-
-    return listKeywords.some((keyword) => lowerMsg.includes(keyword));
-  }
 
   private async getUserDatasets(userId: string) {
     // Use DatasetsService to get user's datasets
@@ -355,11 +258,15 @@ export class AiController {
       });
 
       // Create chart in database with AI-generated config
+      const chartName = result.suggestedName || result.config.title || "AI Generated Chart";
+      // Format: [Type] - [Name] (e.g., "Line - Monthly Sales")
+      const formattedName = `${result.type.charAt(0).toUpperCase() + result.type.slice(1)} - ${chartName}`;
+
       const createdChart = await this.prismaService.prisma.chart.create({
         data: {
           userId,
           datasetId,
-          name: result.suggestedName || result.config.title || "AI Generated Chart",
+          name: formattedName,
           description: `AI-generated ${result.type} chart`,
           type: result.type,
           config: result.config,
