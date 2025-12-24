@@ -350,6 +350,7 @@ if X.shape[1] == 0:
     sys.exit(1)
 
 y = df[target_column].values.reshape(-1, 1)
+# print(f"   🔍 Debug: y shape: {y[0:10]}")
 
 # 🛡️ VALIDATE: Check target values
 if len(y) == 0 or np.isnan(y).all():
@@ -368,8 +369,10 @@ y_scaled = scaler_y.fit_transform(y)
 # 4️⃣ Create sequences with adaptive augmentation
 # -----------------------------
 # Adaptive sequence length (Increased for better context)
-SEQ_LEN = min(30, len(y_scaled) // 5)
-print(f"\n📏 Using sequence length: {SEQ_LEN}")
+# SEQ_LEN = min(30, len(y_scaled) // 5)
+# print(f"\n📏 Using sequence length: {SEQ_LEN}")
+
+SEQ_LEN = 40
 
 initial_samples = len(y_scaled) - SEQ_LEN
 
@@ -468,6 +471,8 @@ if model_type == "SVR":
     y_train_pred = svr_model.predict(X_train_flat)
     y_test_pred = svr_model.predict(X_test_flat)
     conf_val = np.std(y_test_seq - y_test_pred.reshape(-1, 1))
+    print("y_train_pred shape:", y_train_pred.shape)
+    print("y_test_pred shape:", y_test_pred.shape)
 
 else:
     # LSTM with adaptive architecture
@@ -481,25 +486,26 @@ else:
         use_two_layers = False
     elif len(X_train_seq) < 400:
         print("   → Using MODERATE architecture")
-        lstm_units = 48
+        lstm_units = 64
         dropout_rate = 0.15
         use_two_layers = False
     else:
-        print("   → Using STANDARD two-layer architecture")
-        lstm_units_1 = 64
-        lstm_units_2 = 32
+        print("   → Using STANDARD one-layer architecture")
+        lstm_units = 64
+        # lstm_units_2 = 32
         dropout_rate = 0.2
-        use_two_layers = True
+        use_two_layers = False
 
     model = Sequential()
 
     if use_two_layers:
-        model.add(LSTM(lstm_units_1, return_sequences=True, input_shape=input_shape,
-                       dropout=0.1, recurrent_dropout=0.1))
-        model.add(LSTM(lstm_units_2, dropout=0.1, recurrent_dropout=0.1))
+        model.add(LSTM(lstm_units_1, return_sequences=True, input_shape=input_shape))      
+                    #    dropout=0.1, recurrent_dropout=0.1
+        model.add(LSTM(lstm_units_2))
+        # dropout=0.1, recurrent_dropout=0.1)
     else:
-        model.add(LSTM(lstm_units, input_shape=input_shape,
-                       dropout=0.1, recurrent_dropout=0.1))
+        model.add(LSTM(lstm_units, input_shape=input_shape))
+                    #    dropout=0.1, recurrent_dropout=0.1
 
     model.add(Dense(1))
 
