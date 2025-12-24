@@ -26,7 +26,7 @@ export class ChartsService {
     private readonly subscriptionPlansService: SubscriptionPlansService,
     @Inject(forwardRef(() => ChartHistoryService))
     private readonly chartHistoryService: ChartHistoryService
-  ) {}
+  ) { }
 
   async findAll(userId: string) {
     try {
@@ -45,7 +45,6 @@ export class ChartsService {
 
   async findByDataset(datasetId: string, userId: string) {
     try {
-      // First, verify that the dataset belongs to the user
       await this.datasetService.validateOwnership(datasetId, userId);
 
       const charts = await this.prismaService.prisma.chart.findMany({
@@ -133,8 +132,6 @@ export class ChartsService {
   async create(createChartDto: CreateChartDto, userId: string) {
     const { name, description, type, config, datasetId, imageUrl } =
       createChartDto;
-    console.log("Creating chart with config:", config);
-    // Database operation with error handling
     try {
       return await this.prismaService.prisma.chart.create({
         data: {
@@ -148,16 +145,6 @@ export class ChartsService {
         },
       });
     } catch (error) {
-      if ((error as any).code === "P2002") {
-        // Unique constraint violation
-        throw new HttpException(
-          "A chart with this name already exists",
-          HttpStatus.CONFLICT
-        );
-      }
-      if ((error as any).code === "P2003") {
-        throw new BadRequestException("Invalid user or dataset ID");
-      }
       throw new BadRequestException(
         `Failed to create chart: ${(error as any).message}`
       );
@@ -166,7 +153,6 @@ export class ChartsService {
 
   async update(id: string, updateChartDto: UpdateChartDto, userId: string) {
     try {
-      // First validate ownership
       await this.validateOwnership(id, userId);
 
       // If datasetId is being updated, verify access to the new dataset
@@ -353,8 +339,8 @@ export class ChartsService {
               : null,
           yAxisNames: Array.isArray(config?.config?.yAxisKeys)
             ? config.config.yAxisKeys.map((k: string) =>
-                idToName.has(k) ? idToName.get(k) : null
-              )
+              idToName.has(k) ? idToName.get(k) : null
+            )
             : [],
         },
       };

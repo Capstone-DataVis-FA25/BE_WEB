@@ -8,6 +8,9 @@ import { parse } from 'fast-csv';
 import { Readable } from 'stream';
 import { PythonShell } from 'python-shell';
 import { CHART_CONFIG_JSON_SCHEMA } from './dto/generate-chart-config.dto';
+import { DatasetsService } from '../datasets/datasets.service';
+import { CreateDatasetDto, CreateDataHeaderDto } from '../datasets/dto/create-dataset.dto';
+import { AI_TOOLS, AI_SYSTEM_PROMPT } from './ai.prompts';
 
 @Injectable()
 export class AiService {
@@ -19,9 +22,13 @@ export class AiService {
   private readonly CLEAN_MAX_CHARS = 30_000; // Drastically reduced to avoid output token limits
   private readonly CLEAN_MAX_TOKENS = 20_000; // conservative token estimate
 
-  constructor(private readonly configService: ConfigService) {
+  constructor(
+    private readonly configService: ConfigService,
+    private readonly datasetsService: DatasetsService,
+  ) {
     this.apiKey = this.configService.get<string>('OPENROUTER_API_KEY') || '';
   }
+
 
   private async loadUserGuide(): Promise<string> {
     try {
@@ -63,9 +70,15 @@ export class AiService {
     // Load documentation for context
     const userGuideDoc = await this.loadUserGuide();
 
+    const languageInstruction = targetLang && targetLang !== 'auto'
+      ? `Please respond ONLY in ${targetLang}.`
+      : 'Detect the user language and reply naturally in that language.';
+
     const systemPrompt = `You are a DataVis Web Application assistant with access to the official user guide.
 
 ${userGuideDoc}
+
+${languageInstruction}
 
 RESPONSE FORMAT RULES:
 1. **Use Markdown formatting** for better readability:
@@ -126,7 +139,7 @@ EXAMPLE RESPONSE FORMAT:
 
 ---
 
-IMPORTANT: Speak naturally about UI elements users can see. DON'T expose technical implementation details. Language: ${targetLang}.`;
+IMPORTANT: Speak naturally about UI elements users can see. DON'T expose technical implementation details. Sure to use follow requirement => Requirement Language: ${targetLang}.`;
 
     const modelMessages = [
       { role: 'system', content: systemPrompt },
@@ -157,51 +170,344 @@ IMPORTANT: Speak naturally about UI elements users can see. DON'T expose technic
     return raw?.trim() || '';
   }
 
-  /** ========================= INTENT DETECTION ========================= */
-  async detectIntent(message: string): Promise<'create_chart' | 'list_datasets' | 'clean_data' | 'general_chat'> {
-    if (!this.apiKey) return 'general_chat';
 
-    const systemPrompt = `You are an intent classifier for a data visualization app.
-    Classify the user's message into one of these categories:
-    - "create_chart": User wants to visualize data, draw a chart, plot a graph.
-    - "list_datasets": User wants to see their available datasets, list files, check data.
-    - "clean_data": User wants to clean, format, or process data.
-    - "general_chat": Any other casual conversation, questions about how to use, or unclear intents.
+  /** ========================= AGENTIC AI & TOOLS ========================= */
+  async processUserRequest(
+    userId: string,
+    message: string,
+    historyJson?: string,
+    languageCode?: string
+  ): Promise<{
+    success: boolean;
+    reply?: string;
+    action?: 'create_chart' | 'list_datasets' | 'clean_data' | 'general_chat' | 'search_documentation';
+    params?: any;
+    processingTime?: string;
+    language?: string;
+  }> {
+    if (!message) throw new Error('Message is required');
+    if (!this.apiKey) throw new InternalServerErrorException('AI service is not configured');
 
-    Do not answer the user's question. ONLY return the category name.`;
+    const targetLang = languageCode || 'auto';
+
+    // Parse history
+    interface HistMsg { role: 'user' | 'assistant' | 'system'; content: string; }
+    let history: HistMsg[] = [];
+    if (historyJson) {
+      try {
+        const parsed = JSON.parse(historyJson);
+        if (Array.isArray(parsed))
+          history = parsed.filter(m => m && (m.role === 'user' || m.role === 'assistant') && typeof m.content === 'string');
+      } catch { }
+    }
+
+
+
+    // ... inside processUserRequest ...
+
+    const tools = [
+      {
+        type: 'function',
+        function: {
+          name: AI_TOOLS.CREATE_CHART.name,
+          description: AI_TOOLS.CREATE_CHART.description,
+          parameters: {
+            type: 'object',
+            properties: {
+              description: {
+                type: 'string',
+                description: 'Description of the chart to create (e.g. "bar chart of sales over time")',
+              },
+              chartType: {
+                type: 'string',
+                enum: ['line', 'bar', 'pie', 'donut', 'area', 'scatter', 'heatmap', 'cycleplot', 'histogram', 'auto'],
+                description: 'The specific chart type if requested, or "auto".',
+              },
+            },
+            required: ['description'],
+          },
+        },
+      },
+      {
+        type: 'function',
+        function: {
+          name: AI_TOOLS.LIST_DATASETS.name,
+          description: AI_TOOLS.LIST_DATASETS.description,
+          parameters: { type: 'object', properties: {} },
+        },
+      },
+      {
+        type: 'function',
+        function: {
+          name: AI_TOOLS.CLEAN_DATA.name,
+          description: AI_TOOLS.CLEAN_DATA.description,
+          parameters: {
+            type: 'object',
+            properties: {
+              instructions: { type: 'string', description: 'Cleaning instructions if provided' }
+            }
+          },
+        },
+      },
+      {
+        type: 'function',
+        function: {
+          name: AI_TOOLS.SEARCH_DOCUMENTATION.name,
+          description: AI_TOOLS.SEARCH_DOCUMENTATION.description,
+          parameters: {
+            type: 'object',
+            properties: {
+              query: { type: 'string', description: 'The search query or question' }
+            },
+            required: ['query'],
+          },
+        },
+      },
+      {
+        type: 'function',
+        function: {
+          name: AI_TOOLS.CREATE_DATASET.name,
+          description: AI_TOOLS.CREATE_DATASET.description,
+          parameters: {
+            type: 'object',
+            properties: {
+              description: {
+                type: 'string',
+                description: 'Detailed description of the dataset to generate (e.g. "10 students with name, age, grade").',
+              },
+            },
+            required: ['description'],
+          },
+        },
+      },
+    ];
+
+    const systemPrompt = `${AI_SYSTEM_PROMPT}
+     Current Date: ${new Date().toISOString().split('T')[0]}`;
 
     const modelMessages = [
       { role: 'system', content: systemPrompt },
-      { role: 'user', content: message }
+      ...history.slice(-10), // Reduced history for efficiency
+      { role: 'user', content: message },
     ];
 
     try {
+      this.logger.log(`[Agent] Processing request: "${message}"`);
+
       const res = await fetch(`${this.baseUrl}/chat/completions`, {
         method: 'POST',
         headers: this.getCommonHeaders(this.apiKey),
         body: JSON.stringify({
           model: this.model,
           messages: modelMessages,
+          tools: tools,
+          tool_choice: 'auto',
           temperature: 0,
-          max_tokens: 10
         }),
       });
 
-      if (!res.ok) return 'general_chat';
+      if (!res.ok) {
+        const text = await res.text();
+        this.logger.error(`AI API Error: ${res.status} ${text}`);
+        throw new InternalServerErrorException('Failed to contact AI');
+      }
 
       const data = await res.json();
-      const intent = data?.choices?.[0]?.message?.content?.trim()?.toLowerCase();
+      const choice = data?.choices?.[0];
+      const messageResponse = choice?.message;
+      const toolCalls = messageResponse?.tool_calls;
 
-      this.logger.log(`[detectIntent] Message: "${message}" -> Intent: ${intent}`);
+      // Case 1: Tool Call
+      if (toolCalls && toolCalls.length > 0) {
+        const firstTool = toolCalls[0];
+        const functionName = firstTool.function.name;
+        const args = JSON.parse(firstTool.function.arguments || '{}');
 
-      if (['create_chart', 'list_datasets', 'clean_data'].includes(intent)) {
-        return intent as any;
+        this.logger.warn(`[Agent] 🤖 TOOL SELECTED: ${functionName}`);
+        this.logger.log(`[Agent] Args: ${JSON.stringify(args)}`);
+
+        // Handle 'search_documentation' internally (Recursion)
+        if (functionName === 'search_documentation') {
+          return this.handleDocumentationSearch(args.query, history, targetLang);
+        }
+
+        // Handle 'create_dataset' internally
+        if (functionName === 'create_dataset') {
+          // We need userId here. The signature of processUserRequest has userId.
+          return this.handleCreateDataset(userId, args.description, targetLang);
+        }
+
+        // Return other actions to Controller
+        return {
+          success: true,
+          action: functionName as any,
+          params: args,
+          language: targetLang
+        };
       }
-      return 'general_chat';
+
+      // Case 2: Normal Text Reply (No tool)
+      this.logger.log(`[Agent] 💬 Direct Reply (No tool needed)`);
+      return {
+        success: true,
+        reply: this.cleanAnswer(messageResponse?.content),
+        action: 'general_chat',
+        language: targetLang,
+      };
+
     } catch (e) {
-      this.logger.error(`[detectIntent] Error: ${e.message}`);
-      return 'general_chat';
+      this.logger.error(`[Agent] Error: ${e.message}`);
+      // Fallback if tool calling fails
+      return { success: false, reply: 'I encountered an error processing your request.' };
     }
+  }
+
+  // Internal handler for documentation search (RAG-lite)
+  private async handleDocumentationSearch(query: string, history: any[], targetLang: string) {
+    this.logger.warn(`[Agent] 📖 LOADING USER GUIDE for query: "${query}"`);
+    this.logger.warn(`[Agent] This is the ONLY time the full guide is added to context.`);
+
+    const userGuide = await this.loadUserGuide();
+
+    const systemPrompt = `You are a helpful assistant for DataVis App.
+    The user asked: "${query}"
+    
+    Here is the OFFICIAL USER GUIDE:
+    ===
+    ${userGuide}
+    ===
+    
+    Answer the user's question explicitly based on the guide above.
+    - If the info is in the guide, cite the step-by-step instructions.
+    - If not found, say you don't know but suggest checking the "Charts" or "Datasets" page.
+    - Format with Markdown (bold, lists).
+    - Reply in ${targetLang}.`;
+
+    const modelMessages = [
+      { role: 'system', content: systemPrompt },
+      ...history.slice(-2), // Minimal context
+      { role: 'user', content: query }
+    ];
+
+    const res = await fetch(`${this.baseUrl}/chat/completions`, {
+      method: 'POST',
+      headers: this.getCommonHeaders(this.apiKey),
+      body: JSON.stringify({
+        model: this.model,
+        messages: modelMessages,
+        temperature: 0.2, // Low temp for factual answers
+      }),
+    });
+
+    const data = await res.json();
+    const reply = this.cleanAnswer(data?.choices?.[0]?.message?.content);
+
+    return {
+      success: true,
+      reply: reply,
+      action: 'search_documentation' as const, // Informative action
+      language: targetLang
+    };
+  }
+
+  // Internal handler for dataset creation
+  private async handleCreateDataset(userId: string, description: string, targetLang: string) {
+    this.logger.log(`[Agent] 🧬 GENERATING DATASET: "${description}"`);
+
+    const systemPrompt = `You are a synthetic data generator. 
+    User Request: "${description}"
+    
+    Generate a JSON object representing a dataset based on the description.
+    
+    STRICT JSON OUTPUT FORMAT:
+    {
+      "name": "string (dataset name)",
+      "description": "string (short description)",
+      "headers": [
+        {
+          "name": "string (column name)",
+          "type": "string (number | string | date)",
+          "data": [ ...values... ]
+        }
+      ]
+    }
+
+    Rules:
+    - Generate realistic data.
+    - "data" array length must match the requested row count (default to 10 if not specified).
+    - Ensure all columns have the same number of rows.
+    - For date columns, use ISO strings (YYYY-MM-DD).
+    - Output ONLY valid JSON. No markdown blocks.`;
+
+    const res = await fetch(`${this.baseUrl}/chat/completions`, {
+      method: 'POST',
+      headers: this.getCommonHeaders(this.apiKey),
+      body: JSON.stringify({
+        model: this.model,
+        messages: [{ role: 'system', content: systemPrompt }, { role: 'user', content: description }],
+        temperature: 0.7, // Higher temp for creative data generation
+        response_format: { type: 'json_object' }
+      }),
+    });
+
+    try {
+      const data = await res.json();
+      const content = data?.choices?.[0]?.message?.content;
+      if (!content) throw new Error('Empty AI response');
+
+      const datasetData = JSON.parse(content);
+
+      // Validate structure basics
+      if (!datasetData.name || !Array.isArray(datasetData.headers)) {
+        throw new Error('Invalid generated data structure');
+      }
+
+      // Transform to DTO
+      const dto: CreateDatasetDto = {
+        name: datasetData.name,
+        description: datasetData.description,
+        headers: datasetData.headers.map((h: any, idx: number) => ({
+          name: h.name,
+          type: h.type === 'date' ? 'date' : h.type === 'number' ? 'number' : 'string',
+          index: idx,
+          data: h.data
+        })),
+        thousandsSeparator: ',',
+        decimalSeparator: '.'
+      };
+
+      // Call service
+      const newDataset = await this.datasetsService.create(dto, userId);
+
+      const replyMsg = targetLang === 'vi'
+        ? `Tôi đã tạo dataset "${newDataset.name}" thành công.`
+        : `I have successfully created the dataset "${newDataset.name}".`;
+
+      return {
+        success: true,
+        reply: replyMsg,
+        action: 'general_chat' as const,
+        language: targetLang,
+        data: { ...newDataset, url: '/workspace/datasets' },
+        createdDataset: { ...newDataset, url: '/workspace/datasets' } // Explicit return for FE
+      };
+
+    } catch (e) {
+      this.logger.error(`[handleCreateDataset] Failed: ${e.message}`);
+      return {
+        success: false,
+        reply: e.message,
+        language: targetLang
+      };
+    }
+  }
+
+  /**
+   * @deprecated logic moved to processUserRequest
+   */
+  async detectIntent(message: string): Promise<'create_chart' | 'list_datasets' | 'clean_data' | 'general_chat'> {
+    // Legacy fallback or just remove usage in controller
+    return 'general_chat';
   }
 
   /** ========================= CSV CLEAN ========================= */

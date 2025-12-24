@@ -9,7 +9,7 @@ datasource db {
 
 model Chart {
   id           String         @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
-  name         String         @unique
+  name         String         
   description  String?
   type         String
   config       Json
