@@ -19,15 +19,6 @@ export class EvaluateChartDto {
   chartImage: string;
 
   @ApiPropertyOptional({
-    description: 'Specific questions or aspects to evaluate',
-    example: ['Is the color scheme appropriate?', 'Are the labels clear?']
-  })
-  @IsOptional()
-  @IsArray()
-  @IsString({ each: true })
-  questions?: string[];
-
-  @ApiPropertyOptional({
     description: 'Language code for response',
     example: 'vi',
     default: 'vi'
