@@ -218,6 +218,22 @@ IMPORTANT: Speak naturally about UI elements users can see. DON'T expose technic
                 type: 'string',
                 description: 'Description of the chart to create (e.g. "bar chart of sales over time")',
               },
+              datasetId: {
+                type: 'string',
+                description: 'Dataset ID selected by user. If missing, list datasets first.'
+              },
+              headers: {
+                type: 'array',
+                description: 'Optional dataset headers (id, name, type). If absent, service will fetch.',
+                items: {
+                  type: 'object',
+                  properties: {
+                    id: { type: 'string' },
+                    name: { type: 'string' },
+                    type: { type: 'string' }
+                  }
+                }
+              },
               chartType: {
                 type: 'string',
                 enum: ['line', 'bar', 'pie', 'donut', 'area', 'scatter', 'heatmap', 'cycleplot', 'histogram', 'auto'],
@@ -335,6 +351,55 @@ IMPORTANT: Speak naturally about UI elements users can see. DON'T expose technic
         if (functionName === 'create_dataset') {
           // We need userId here. The signature of processUserRequest has userId.
           return this.handleCreateDataset(userId, args.description, targetLang);
+        }
+
+        if (functionName === 'create_chart') {
+          // If user has not selected a dataset yet, prompt FE to show the list
+          if (!args.datasetId) {
+            const datasets = await this.datasetsService.findAll(userId);
+            this.logger.warn('[Agent] No dataset selected. Returning dataset list.');
+            return {
+              success: true,
+              action: 'list_datasets',
+              params: { datasets, originalMessage: message, requestedChart: args.description, chartType: args.chartType },
+              reply: 'Please choose a dataset to continue creating the chart.',
+              language: targetLang,
+            };
+          }
+
+          // If datasetId is present but headers are missing, fetch headers
+          if (args.datasetId && (!args.headers || !Array.isArray(args.headers) || args.headers.length === 0)) {
+            this.logger.log(`[Agent] Fetching dataset headers for datasetId: ${args.datasetId}`);
+            const dataset = await this.datasetsService.findOne(args.datasetId, userId);
+            if (!dataset) {
+              this.logger.error(`[Agent] Dataset not found for id: ${args.datasetId}`);
+              return { success: false, reply: `Dataset not found for id: ${args.datasetId}` };
+            }
+            // Build headers array for chart config
+            args.headers = (dataset.headers || []).map((h: any) => ({
+              id: h.id || h.name,
+              name: h.name,
+              type: h.type,
+            }));
+          }
+          // Now call generateChartConfig with all info
+          try {
+            const chartConfig = await this.generateChartConfig({
+              prompt: args.description || '',
+              datasetId: args.datasetId,
+              headers: args.headers,
+              chartType: args.chartType || 'auto',
+            });
+            return {
+              success: true,
+              action: 'create_chart',
+              params: chartConfig,
+              language: targetLang,
+            };
+          } catch (err: any) {
+            this.logger.error(`[Agent] Failed to generate chart config: ${err.message}`);
+            return { success: false, reply: err.message };
+          }
         }
 
         // Return other actions to Controller
@@ -1448,6 +1513,7 @@ ALL chart types must have BOTH:
 **Important Rules:**
 - ALWAYS use column IDs from dataset headers for keys.
 - ALWAYS use column NAMES from dataset headers for labels (xAxisLabel, yAxisLabel, series name).
+- Auto-select the best xAxisKey/series/value keys based on types and the user prompt; DO NOT ask the user to choose columns.
 - For line/bar/area/scatter: Include BOTH root properties AND nested config/formatters/axisConfigs.
 - Set xAxisKey and yAxisKeys at root as EMPTY ("" and []) - real values go in axisConfigs.
 - Choose appropriate numeric columns for values.
