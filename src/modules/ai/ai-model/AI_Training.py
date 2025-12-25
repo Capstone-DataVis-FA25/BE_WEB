@@ -202,17 +202,12 @@ if model_type is None:
     sys.exit(1)
 
 model_type = model_type.strip().upper()
-if model_type == "SVR":
-    MAX_OH_CATS = 20
-elif model_type == "LSTM":
-    MAX_OH_CATS = 50
-else:
+if model_type not in ["SVR", "LSTM"]:
     print(
         f"❌ ERROR: Invalid MODEL_TYPE='{model_type}', expected 'SVR' or 'LSTM'")
     sys.exit(1)
 
 print(f"\n🤖 Using model type from environment: {model_type}")
-print(f"   Limiting categorical features to top {MAX_OH_CATS} unique values")
 
 # 🧹 CLEANUP: Force target to be numeric (handles '?0.2' typos)
 print(f"   🔍 Debug: Before numeric conversion, df shape: {df.shape}")
@@ -252,50 +247,35 @@ if iqr > 0:
             f"   🔍 Target clipping applied: [{before_clip_min}, {before_clip_max}] -> [{after_clip_min}, {after_clip_max}]")
 
 # 🔄 RE-EVALUATE TYPES: Now that data is clean, split features
-# If no feature columns provided, automatically use all numeric
-# columns (except the target) plus the target itself.
+# If no feature columns provided, default to univariate forecasting
+# (using only the target column as feature)
 if len(feature_columns) == 0:
-    auto_numeric_features = [
-        c for c in df.columns
-        if c != target_column and pd.api.types.is_numeric_dtype(df[c])
-    ]
-    if len(auto_numeric_features) == 0:
-        print("   ℹ️  No feature columns provided and no extra numeric columns found; using target column as feature (univariate forecasting)")
-        feature_columns = [target_column]
-    else:
-        feature_columns = auto_numeric_features + [target_column]
-        print("   ℹ️  No feature columns provided; auto-selected numeric feature set:", feature_columns)
+    print("   ℹ️  No feature columns provided; defaulting to univariate forecasting (target column only)")
+    feature_columns = [target_column]
 
+# Validate that all feature columns are numeric
 numeric_features = [
     c for c in feature_columns if pd.api.types.is_numeric_dtype(df[c])]
-categorical_features = [
+non_numeric_features = [
     c for c in feature_columns if not pd.api.types.is_numeric_dtype(df[c])]
+
+if non_numeric_features:
+    print(
+        f"❌ ERROR: Non-numeric feature columns detected: {non_numeric_features}")
+    print("   Only numeric columns are allowed for features and target")
+    sys.exit(1)
 
 # Handle specific missing values if any remain
 for c in numeric_features:
     df[c] = df[c].fillna(df[c].median())
-for c in categorical_features:
-    df[c] = df[c].fillna("Unknown")
 
-# 🔒 Apply Top-K Limit
-for c in categorical_features:
-    unique_vals = df[c].value_counts()
-    if len(unique_vals) > MAX_OH_CATS:
-        top_k = unique_vals.nlargest(MAX_OH_CATS).index
-        print(
-            f"   ⚠️  Limiting {c}: {len(unique_vals)} -> {MAX_OH_CATS} categories")
-        df[c] = df[c].apply(lambda x: x if x in top_k else 'Other')
-
-# Encode categorical features
-df_encoded = pd.get_dummies(
-    df[categorical_features], drop_first=True) if categorical_features else pd.DataFrame()
+# All features are numeric, so no encoding needed
 X_numeric = df[numeric_features] if numeric_features else pd.DataFrame()
+df_encoded = pd.DataFrame()  # No categorical features to encode
 
 print(f"   🔍 Debug: df shape before X creation: {df.shape}")
 print(f"   🔍 Debug: numeric_features count: {len(numeric_features)}")
-print(f"   🔍 Debug: categorical_features count: {len(categorical_features)}")
 print(f"   🔍 Debug: X_numeric shape: {X_numeric.shape}")
-print(f"   🔍 Debug: df_encoded shape: {df_encoded.shape}")
 
 # Create X matrix - handle empty DataFrames properly
 if X_numeric.empty and df_encoded.empty:
@@ -345,11 +325,8 @@ if X.shape[1] == 0:
     print(f"❌ ERROR: Invalid feature matrix shape: {X.shape}")
     print(f"   DataFrame shape: {df.shape}")
     print(f"   Numeric features: {len(numeric_features)}")
-    print(f"   Categorical features: {len(categorical_features)}")
     print(
         f"   X_numeric shape: {X_numeric.shape if not X_numeric.empty else 'empty'}")
-    print(
-        f"   df_encoded shape: {df_encoded.shape if not df_encoded.empty else 'empty'}")
     sys.exit(1)
 
 y = df[target_column].values.reshape(-1, 1)
