@@ -25,9 +25,16 @@ export class ForecastCreationJobService {
   constructor(
     private readonly forecastProcessingService: ForecastProcessingService,
     private readonly notificationService: NotificationService,
-  ) {}
+  ) { }
 
   createJob(userId: string, dto: ForecastDto): string {
+    // Check if user already has an active (pending) job
+    const activeJob = this.getActiveJobForUser(userId);
+    if (activeJob) {
+      this.logger.warn(`User ${userId} already has an active forecast job: ${activeJob.jobId}`);
+      throw new Error(`You already have a forecast in progress. Please wait for it to complete before starting a new one.`);
+    }
+
     const jobId = uuidv4();
 
     this.logger.log(`Creating forecast creation job ${jobId} for user ${userId}`);
@@ -41,6 +48,18 @@ export class ForecastCreationJobService {
     // Process job asynchronously
     this.processJob(jobId, userId, dto);
     return jobId;
+  }
+
+  /**
+   * Get the active (pending) job for a user, if any
+   */
+  private getActiveJobForUser(userId: string): { jobId: string; job: ForecastCreationJobRecord } | null {
+    for (const [jobId, job] of jobStore.entries()) {
+      if (job.userId === userId && job.status === 'pending') {
+        return { jobId, job };
+      }
+    }
+    return null;
   }
 
   private async processJob(jobId: string, userId: string, dto: ForecastDto) {

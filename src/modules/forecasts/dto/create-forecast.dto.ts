@@ -12,9 +12,6 @@ export class CreateForecastDto {
   @IsString()
   targetColumn: string;
 
-  @IsString()
-  timeScale: string;
-
   @IsNumber()
   forecastWindow: number;
 

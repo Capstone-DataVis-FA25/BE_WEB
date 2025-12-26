@@ -133,10 +133,14 @@ export class SubscriptionPlansService {
             if (plan.isActive) {
                 throw new BadRequestException("Cannot delete an active plan. Deactivate it first.");
             }
+            // If there are users subscribed to this plan, prevent deletion
+            const usersWithPlan = await this.prismaService.prisma.user.count({
+                where: { subscriptionPlanId: id },
+            });
 
-            // Check if plan is being used (this would require checking user subscriptions in a full implementation)
-            // For now, we'll just add a placeholder comment for future implementation
-            // In a complete implementation, you would check if any users are subscribed to this plan
+            if (usersWithPlan > 0) {
+                throw new BadRequestException("Cannot delete a plan that has active subscribers.");
+            }
 
             await this.prismaService.prisma.subscriptionPlan.delete({
                 where: { id },

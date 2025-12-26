@@ -26,6 +26,7 @@ import {
 import { FileInterceptor } from "@nestjs/platform-express";
 import { diskStorage } from "multer";
 import { AiService } from "@modules/ai/ai.service";
+import { AiRequestService } from "./ai-request.service";
 import { CleanCsvDto } from "./dto/clean-csv.dto";
 import { CleanExcelUploadDto } from "./dto/clean-excel.dto";
 import { ChatWithAiDto } from "./dto/chat-with-ai.dto";
@@ -38,6 +39,7 @@ import { PrismaService } from "../../prisma/prisma.service";
 import { DatasetsService } from "../datasets/datasets.service";
 import { AiChartEvaluationService } from "./ai.chart-evaluation.service";
 import { JwtAccessTokenGuard } from "@modules/auth/guards/jwt-access-token.guard";
+import { AiRequestGuard } from "./guards/ai-request.guard";
 import { EvaluateChartDto } from "./dto/evaluate-chart.dto";
 import { AuthRequest } from "@modules/auth/auth.controller";
 import { ForecastProcessingService } from "@modules/forecasts/forecast-processing.service";
@@ -50,6 +52,7 @@ import { ForecastDto } from "./dto/forecast.dto";
 export class AiController {
   constructor(
     private readonly aiService: AiService,
+    private readonly aiRequestService: AiRequestService,
     private readonly aiCleanJobService: AiCleanJobService,
     private readonly aiChartEvaluationService: AiChartEvaluationService,
     private readonly prismaService: PrismaService,
@@ -65,73 +68,103 @@ export class AiController {
   async chatWithAi(@Body() body: ChatWithAiDto, @Req() req: any) {
     if (!body.message)
       throw new HttpException(
-        "❌ Vui lòng gửi tin nhắn",
+        "Please send the message",
         HttpStatus.BAD_REQUEST
       );
     try {
-      // Extract userId from JWT token (guaranteed by JwtAccessTokenGuard)
       const userId = req.user?.userId || req.user?.id;
 
-      // Check if user is asking to create a chart
-      const isChartRequest = this.isChartGenerationRequest(body.message);
-      // Check if user wants to see dataset list
-      const wantsDatasetList = this.isDatasetListRequest(body.message);
-
-      // Debug log
-      console.log("[DEBUG] Chat message:", body.message);
-      console.log("[DEBUG] Is chart request:", isChartRequest);
-      console.log("[DEBUG] Wants dataset list:", wantsDatasetList);
-      console.log("[DEBUG] Has datasetId:", !!body.datasetId);
-      console.log("[DEBUG] UserId:", userId);
-
-      if (isChartRequest && body.datasetId && userId) {
-        // User wants to create chart AND has dataset
-        
-        // NEW: Check if chartType is already selected
-        if (!body.chartType) {
-          console.log("[DEBUG] Route: Ask for chart type preference");
-          return {
-            reply: "Bạn muốn tôi tự động chọn loại biểu đồ phù hợp hay bạn muốn tự chọn loại biểu đồ cụ thể?",
-            success: true,
-            needsChartTypeSelection: true, // Trigger UI for chart type selection
-            datasetId: body.datasetId, // Keep dataset context
-            originalMessage: body.message // Keep original prompt context
-          };
-        }
-
-        // Generate directly with specific or auto chart type
-        console.log("[DEBUG] Route: Generate chart directly with type:", body.chartType);
-        const result = await this.handleChartGeneration(
-          body.message,
-          body.datasetId,
-          userId,
-          body.chartType
-        );
-        return result;
-      } else if (isChartRequest && userId) {
-        console.log("[DEBUG] Route: Auto-fetch datasets for chart creation");
-        const datasets = await this.getUserDatasets(userId);
-        console.log("[DEBUG] Found datasets:", datasets.length);
-        const result = await this.handleChartRequestWithoutDataset(body.message, datasets);
-        return result;
-      } else if (wantsDatasetList && userId) {
-        console.log("[DEBUG] Route: Show dataset list");
-        const datasets = await this.getUserDatasets(userId);
-        console.log("[DEBUG] Found datasets:", datasets.length);
-        const result = await this.showDatasetList(datasets);
-        return result;
-      }
-
-      // Regular chat
-      console.log("[DEBUG] Route: Regular chat");
-      const result = await this.aiService.chatWithAi(
+      // Call the Agentic Service
+      const agentResult = await this.aiService.processUserRequest(
+        userId,
         body.message,
         body.messages,
         body.language
       );
-      return result;
-      return await this.aiService.chatWithAi(body.message, body.messages, body.language);
+
+      const lang = (agentResult.language || body.language || '').toLowerCase();
+
+      console.log("[DEBUG] Agent Action:", agentResult.action);
+      console.log("[DEBUG] Agent Params:", agentResult.params);
+
+      // --- HANDLE AGENT ACTIONS ---
+
+      // 1. CREATE CHART
+      if (agentResult.action === 'create_chart') {
+        const params = agentResult.params || {};
+
+        // If we have a dataset context, proceed to generation
+        if (body.datasetId) {
+          const specificTypeFromAgent = params.chartType && params.chartType !== 'auto' ? params.chartType : null;
+          const effectiveChartType = specificTypeFromAgent || body.chartType || 'auto';
+
+          return await this.handleChartGeneration(
+            params.description || body.message,
+            body.datasetId,
+            userId,
+            effectiveChartType,
+            lang
+          );
+        } else {
+          // No dataset selected -> Show list
+          const datasets = params.datasets || await this.getUserDatasets(userId);
+          return await this.handleChartRequestWithoutDataset(body.message, datasets, lang, agentResult.reply);
+        }
+      }
+
+      // 2. LIST DATASETS
+      if (agentResult.action === 'list_datasets') {
+        const datasets = agentResult.params?.datasets || await this.getUserDatasets(userId);
+        return await this.showDatasetList(datasets, lang, agentResult.reply);
+      }
+
+      // 3. CLEAN DATA (Suggestion)
+      if (agentResult.action === 'clean_data') {
+        // Return a text reply (if any) plus an action flag for the UI to maybe open a modal?
+        // For now, just return specific text helper + action flag
+        const fallbackClean = await this.localizeReply(
+          'I can help clean your data. Please upload a CSV/Excel file or pick a dataset.',
+          lang,
+        );
+        return {
+          reply: agentResult.reply || fallbackClean,
+          success: true,
+          action: 'clean_data', // Frontend might react to this
+        };
+      }
+
+      // 4. DOCUMENTATION / GENERAL CHAT
+      // Returning the text response directly
+      const lowerMsg = (body.message || '').toLowerCase();
+      const mentionsChart = ['chart', 'biểu đồ', 'graph', 'plot', 'visual', 'visualization'].some(k => lowerMsg.includes(k));
+      const mentionsDataset = ['dataset', 'data set', 'dữ liệu', 'data file', 'file dữ liệu'].some(k => lowerMsg.includes(k));
+
+      // Fallback: if user already picked a dataset, auto-generate chart instead of asking for headers
+      if (body.datasetId && mentionsChart) {
+        return await this.handleChartGeneration(
+          body.message,
+          body.datasetId,
+          userId,
+          body.chartType || 'auto',
+          lang
+        );
+      }
+
+      // If user is talking about chart/dataset but no datasetId provided, proactively list datasets
+      if (!body.datasetId && (mentionsChart || mentionsDataset)) {
+        const datasets = await this.getUserDatasets(userId);
+        return await this.showDatasetList(datasets, lang);
+      }
+
+      return {
+        reply: agentResult.reply,
+        success: true,
+        action: agentResult.action || 'general_chat',
+        processingTime: agentResult.processingTime
+      };
+
     } catch (e: any) {
+      console.error("[AiController] Error:", e);
       throw new HttpException(
         { success: false, message: e.message },
         HttpStatus.INTERNAL_SERVER_ERROR
@@ -139,145 +172,45 @@ export class AiController {
     }
   }
 
-  private isChartGenerationRequest(message: string): boolean {
-    const lowerMsg = message.toLowerCase().trim();
 
-    console.log("[DEBUG isChartGenerationRequest] Input message:", message);
-    console.log("[DEBUG isChartGenerationRequest] Lowercased:", lowerMsg);
-
-    // Positive keywords - intent to CREATE chart
-    const createIntents = [
-      "tạo biểu đồ",
-      "tạo chart",
-      "vẽ biểu đồ",
-      "vẽ chart",
-      "tạo một biểu đồ",
-      "tạo một chart",
-      "create chart",
-      "generate chart",
-      "make chart",
-      "draw chart",
-      "create a chart",
-      "make a chart",
-      "generate a chart",
-      "draw a chart",
-    ];
-
-    // Check if message starts with create intent or contains it
-    const hasCreateIntent = createIntents.some((intent) => {
-      const matches = lowerMsg.includes(intent);
-      if (matches) {
-        console.log("[DEBUG isChartGenerationRequest] Matched intent:", intent);
-      }
-      return matches;
-    });
-
-    // Negative keywords - NOT a chart creation request
-    const negativePatterns = [
-      "là gì",
-      "what is",
-      "giải thích",
-      "explain",
-      "hướng dẫn",
-      "guide",
-      "cách",
-      "how to",
-      "thế nào",
-      "?", // Questions typically not creation requests
-    ];
-
-    // If message is a question about charts, NOT a creation request
-    const isQuestion = negativePatterns.some((pattern) => {
-      const matches = lowerMsg.includes(pattern);
-      if (matches) {
-        console.log(
-          "[DEBUG isChartGenerationRequest] Matched negative pattern:",
-          pattern
-        );
-      }
-      return matches;
-    });
-
-    const result = hasCreateIntent && !isQuestion;
-    console.log(
-      "[DEBUG isChartGenerationRequest] hasCreateIntent:",
-      hasCreateIntent
-    );
-    console.log("[DEBUG isChartGenerationRequest] isQuestion:", isQuestion);
-    console.log("[DEBUG isChartGenerationRequest] Final result:", result);
-
-    return result;
-  }
-
-  private isDatasetListRequest(message: string): boolean {
-    const lowerMsg = message.toLowerCase().trim();
-
-    const listKeywords = [
-      // Vietnamese dataset keywords
-      "dataset đâu",
-      "dataset nào",
-      "có dataset",
-      "dataset gì",
-      "danh sách dataset",
-      "xem dataset",
-      "hiển thị dataset",
-      "có những dataset",
-      "các dataset",
-      "dữ liệu nào",
-      "xem dữ liệu",
-      "có dữ liệu",
-      "danh sách dữ liệu",
-      "list",
-      "danh sách",
-      "show dataset",
-      "list dataset",
-      "my dataset",
-      "available dataset",
-      "show data",
-      "list data",
-      "my data",
-      "what dataset",
-      "which dataset",
-      
-      // Simple confirmations (when AI asks to show list)
-      "yes",
-      "ok",
-      "okay",
-      "có",
-      "được",
-      "list",
-    ];
-
-    return listKeywords.some((keyword) => lowerMsg.includes(keyword));
-  }
 
   private async getUserDatasets(userId: string) {
     // Use DatasetsService to get user's datasets
     return await this.datasetsService.findAll(userId);
   }
 
-  private async askForDatasetList() {
-    return {
-      reply: `**Tạo biểu đồ từ dữ liệu**\n\n🤔 Tôi hiểu bạn muốn xem danh sách các dataset hiện có để lựa chọn.\n\n**Để xem và quản lý các dataset của bạn:**\n\n1️⃣ **Truy cập Dataset Management**\n   • Click vào mục "Data" hoặc "Datasets" trên thanh điều hướng\n   • Hoặc tìm menu "Manage Datasets"\n\n2️⃣ **Xem danh sách**\n   • Bảng sẽ hiển thị tất cả dataset bạn đã tải lên\n   • Thông tin: Tên, Số rows, Ngày tạo/cập nhật\n\n💡 **Mẹo:** Nếu chưa có dataset, click "Upload New Dataset" để thêm dữ liệu mới!\n\n---\n\n**Bạn có muốn tôi hiển thị danh sách dataset ngay đây không?**\n\n👉 Trả lời "Có" hoặc "List" để xem danh sách`,
-      success: true,
-      needsUserConfirmation: true,
-      action: "list_datasets",
-    };
-  }
+  private async showDatasetList(datasets: any[], language?: string, aiReply?: string) {
+    const lang = (language || '').toLowerCase();
 
-  private async showDatasetList(datasets: any[]) {
-    if (datasets.length === 0) {
+    if (aiReply) {
       return {
-        reply:
-          "**Bạn chưa có dataset nào!**\n\nĐể tạo biểu đồ, bạn cần có dataset trước. Hãy:\n1. Vào trang **Datasets**\n2. Click **Upload Dataset** để tải lên file dữ liệu\n3. Sau đó quay lại đây và chọn dataset để tạo biểu đồ\n\n💡 Hoặc bạn có thể dùng sample data có sẵn trong hệ thống!",
+        reply: aiReply,
+        success: true,
+        needsDatasetSelection: true,
+        datasets,
+      };
+    }
+
+    if (datasets.length === 0) {
+      const fallback = await this.localizeReply(
+        '**You have no datasets yet!**\n\nTo create a chart, please:\n1. Go to **Datasets**\n2. Click **Upload Dataset** to add your data\n3. Come back and select a dataset to create a chart\n\n💡 Or use built-in sample data to try quickly!',
+        lang,
+      );
+      return {
+        reply: fallback,
         success: true,
         needsDatasetSelection: true,
         datasets: [],
       };
     }
 
+    const fallbackList = await this.localizeReply(
+      `**Your Datasets**\n\nYou have ${datasets.length} dataset${datasets.length > 1 ? 's' : ''}.\n\nWhen ready, pick one and describe the chart you want!`,
+      lang,
+    );
+
     return {
-      reply: `**Danh sách Dataset của bạn**\n\nBạn có ${datasets.length} dataset${datasets.length > 1 ? "s" : ""} \n\nKhi bạn sẵn sàng, hãy chọn dataset và mô tả biểu đồ bạn muốn!`,
+      reply: fallbackList,
       success: true,
       needsDatasetSelection: true,
       datasets: datasets,
@@ -286,20 +219,41 @@ export class AiController {
 
   private async handleChartRequestWithoutDataset(
     message: string,
-    datasets: any[]
+    datasets: any[],
+    language?: string,
+    aiReply?: string,
   ) {
-    if (datasets.length === 0) {
+    const lang = (language || '').toLowerCase();
+
+    if (aiReply) {
       return {
-        reply:
-          "**Bạn chưa có dataset nào!**\n\nĐể tạo biểu đồ, bạn cần có dataset trước. Hãy:\n1. Vào trang **Datasets**\n2. Click **Upload Dataset** để tải lên file dữ liệu\n3. Sau đó quay lại đây và chọn dataset để tạo biểu đồ\n\n💡 Hoặc bạn có thể dùng sample data có sẵn trong hệ thống!",
+        reply: aiReply,
+        success: true,
+        needsDatasetSelection: true,
+        datasets,
+      };
+    }
+
+    if (datasets.length === 0) {
+      const fallback = await this.localizeReply(
+        '**You have no datasets yet!**\n\nTo create a chart, please:\n1. Go to **Datasets**\n2. Click **Upload Dataset** to add your data\n3. Come back and select a dataset to create a chart\n\n💡 Or use built-in sample data to try quickly!',
+        lang,
+      );
+      return {
+        reply: fallback,
         success: true,
         needsDatasetSelection: true,
         datasets: [],
       };
     }
 
+    const fallbackPrompt = await this.localizeReply(
+      `**Choose a dataset to create a chart**\n\nYou have ${datasets.length} dataset${datasets.length > 1 ? 's' : ''}.\n\nPlease pick one from the list, then describe the chart you want!`,
+      lang,
+    );
+
     return {
-      reply: `📊 **Chọn dataset để tạo biểu đồ**\n\nBạn có ${datasets.length} dataset${datasets.length > 1 ? "s" : ""}:\n\n Vui lòng chọn dataset từ danh sách trên, sau đó mô tả chi tiết hơn về biểu đồ bạn muốn tạo!`,
+      reply: fallbackPrompt,
       success: true,
       needsDatasetSelection: true,
       datasets: datasets,
@@ -310,9 +264,12 @@ export class AiController {
     message: string,
     datasetId: string,
     userId: string,
-    chartType?: string
+    chartType?: string,
+    language?: string,
   ) {
     try {
+      const lang = (language || '').toLowerCase();
+
       // Fetch dataset with headers
       const dataset = await this.prismaService.prisma.dataset.findUnique({
         where: { id: datasetId },
@@ -325,14 +282,14 @@ export class AiController {
 
       if (!dataset) {
         return {
-          reply: "❌ Dataset không tồn tại. Vui lòng chọn dataset hợp lệ.",
+          reply: await this.localizeReply('❌ Dataset not found. Please select a valid dataset.', lang),
           success: false,
         };
       }
 
       if (dataset.userId !== userId) {
         return {
-          reply: "❌ Bạn không có quyền truy cập dataset này.",
+          reply: await this.localizeReply('❌ You do not have permission to access this dataset.', lang),
           success: false,
         };
       }
@@ -348,15 +305,19 @@ export class AiController {
         prompt: message,
         datasetId: datasetId,
         headers,
-        chartType: chartType !== 'auto' ? chartType : undefined,
+        chartType: chartType || 'auto',
       });
 
       // Create chart in database with AI-generated config
+      const chartName = result.suggestedName || result.config.title || "AI Generated Chart";
+      // Format: [Type] - [Name] (e.g., "Line - Monthly Sales")
+      const formattedName = `${result.type.charAt(0).toUpperCase() + result.type.slice(1)} - ${chartName}`;
+
       const createdChart = await this.prismaService.prisma.chart.create({
         data: {
           userId,
           datasetId,
-          name: result.suggestedName || result.config.title || "AI Generated Chart",
+          name: formattedName,
           description: `AI-generated ${result.type} chart`,
           type: result.type,
           config: result.config,
@@ -366,25 +327,44 @@ export class AiController {
       // Return chart URL for edit mode with full URL
       const chartUrl = `/chart-editor?chartId=${createdChart.id}`;
 
+      const successReply = await this.localizeReply(
+        `Chart created successfully ✅\n\n **${result.config.title}**\n\n🔗 [**Open Chart Editor →**](${chartUrl})\n\n Click to view and edit the chart!`,
+        lang,
+      );
+
       return {
-        reply: `Đã tạo biểu đồ thành công ✅\n\n **${result.config.title}**\n\n🔗 [**Mở Chart Editor →**](${chartUrl})\n\n Bấm vào link trên để xem và chỉnh sửa biểu đồ!`,
+        reply: successReply,
         success: true,
         chartGenerated: true,
         chartData: {
           ...result,
-          chartUrl: chartUrl, 
+          chartUrl: chartUrl,
         },
       };
     } catch (error: any) {
+      const errReply = await this.localizeReply(`❌ ${error.message}`, language);
       return {
-        reply: `❌ Có lỗi khi tạo biểu đồ: ${error.message}\n\nVui lòng thử lại hoặc mô tả chi tiết hơn về biểu đồ bạn muốn.`,
+        reply: errReply,
         success: false,
       };
     }
   }
 
+  // Simple helper: ask AI to express fallback text in the target language; falls back to original text on error
+  private async localizeReply(text: string, language?: string) {
+    const target = language && language !== 'auto' ? language : undefined;
+    if (!target) return text;
+    try {
+      const res = await this.aiService.chatWithAi(text, undefined, target);
+      return res?.reply || text;
+    } catch {
+      return text;
+    }
+  }
+
   // Clean raw CSV via AI
   @Post("clean")
+  @UseGuards(JwtAccessTokenGuard, AiRequestGuard)
   @HttpCode(HttpStatus.OK)
   @ApiOperation({ summary: "Clean CSV data and return a 2D JSON array" })
   @ApiOkResponse({
@@ -413,6 +393,7 @@ export class AiController {
 
   // Clean uploaded Excel/CSV and return a 2D JSON matrix via AI
   @Post("clean-excel")
+  @UseGuards(JwtAccessTokenGuard, AiRequestGuard)
   @ApiOperation({
     summary:
       "Clean data from an uploaded Excel/CSV file and return a 2D JSON array",
@@ -458,6 +439,7 @@ export class AiController {
 
   // Clean raw CSV via AI (ASYNC, returns jobId, not result)
   @Post("clean-async")
+  @UseGuards(JwtAccessTokenGuard, AiRequestGuard)
   @HttpCode(HttpStatus.OK)
   @ApiOperation({
     summary: "Clean CSV data async, return jobId, notify user when done",
@@ -509,6 +491,7 @@ export class AiController {
 
   // Clean uploaded Excel/CSV file via AI (ASYNC, returns jobId, not result)
   @Post("clean-excel-async")
+  @UseGuards(JwtAccessTokenGuard, AiRequestGuard)
   @ApiOperation({
     summary:
       "Clean uploaded Excel/CSV file async, return jobId, notify user when done",
@@ -675,7 +658,7 @@ export class AiController {
   }
 
   @Post('evaluate-chart')
-  @UseGuards(JwtAccessTokenGuard)
+  @UseGuards(JwtAccessTokenGuard, AiRequestGuard)
   @HttpCode(HttpStatus.OK)
   @ApiOperation({
     summary: 'Evaluate a chart using AI based on its image and dataset',
@@ -821,8 +804,8 @@ export class AiController {
       );
     }
   }
-   @Post('forecast')
-  @UseGuards(JwtAccessTokenGuard)
+  @Post('forecast')
+  @UseGuards(JwtAccessTokenGuard, AiRequestGuard)
   @HttpCode(HttpStatus.OK)
   @ApiOperation({
     summary: 'Generate time series forecast (async)',
@@ -856,8 +839,21 @@ export class AiController {
       if (e instanceof HttpException) {
         throw e;
       }
+      // If user already has an active job, return 409 Conflict
+      if (e.message?.includes('already have a forecast in progress')) {
+        throw new HttpException(
+          {
+            success: false,
+            message: e.message,
+          },
+          HttpStatus.CONFLICT
+        );
+      }
       throw new HttpException(
-        e.message || 'Failed to start forecast job',
+        {
+          success: false,
+          message: e.message || 'Failed to start forecast job',
+        },
         e.status || HttpStatus.INTERNAL_SERVER_ERROR
       );
     }
@@ -884,5 +880,29 @@ export class AiController {
     }
     return result;
   }
+
+  @Get('request-status')
+  @UseGuards(JwtAccessTokenGuard)
+  @ApiOperation({ summary: 'Get current AI request count and limit for user' })
+  @ApiOkResponse({
+    description: 'AI request status',
+    schema: {
+      type: 'object',
+      properties: {
+        currentCount: { type: 'number' },
+        maxLimit: { type: 'number' },
+        remaining: { type: 'number' },
+      },
+    },
+  })
+  async getAiRequestStatus(@Request() req: AuthRequest) {
+    const userId = req.user.userId || req.user.sub;
+    const status = await this.aiRequestService.getAiRequestStatus(userId);
+    return {
+      code: 200,
+      message: 'Success',
+      data: status,
+    };
+  }
 }
- 
+

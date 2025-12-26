@@ -9,7 +9,7 @@ datasource db {
 
 model Chart {
   id           String         @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
-  name         String         @unique
+  name         String         
   description  String?
   type         String
   config       Json
@@ -181,7 +181,6 @@ model Forecast {
   name          String?
   targetColumn  String
   featureColumns String[]  @default([])
-  timeScale     String
   forecastWindow Int
   modelType     String
   predictions   Json      // Array of prediction objects

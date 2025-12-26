@@ -8,6 +8,9 @@ import { parse } from 'fast-csv';
 import { Readable } from 'stream';
 import { PythonShell } from 'python-shell';
 import { CHART_CONFIG_JSON_SCHEMA } from './dto/generate-chart-config.dto';
+import { DatasetsService } from '../datasets/datasets.service';
+import { CreateDatasetDto, CreateDataHeaderDto } from '../datasets/dto/create-dataset.dto';
+import { AI_TOOLS, AI_SYSTEM_PROMPT } from './ai.prompts';
 
 @Injectable()
 export class AiService {
@@ -19,9 +22,13 @@ export class AiService {
   private readonly CLEAN_MAX_CHARS = 30_000; // Drastically reduced to avoid output token limits
   private readonly CLEAN_MAX_TOKENS = 20_000; // conservative token estimate
 
-  constructor(private readonly configService: ConfigService) {
+  constructor(
+    private readonly configService: ConfigService,
+    private readonly datasetsService: DatasetsService,
+  ) {
     this.apiKey = this.configService.get<string>('OPENROUTER_API_KEY') || '';
   }
+
 
   private async loadUserGuide(): Promise<string> {
     try {
@@ -63,9 +70,15 @@ export class AiService {
     // Load documentation for context
     const userGuideDoc = await this.loadUserGuide();
 
+    const languageInstruction = targetLang && targetLang !== 'auto'
+      ? `Please respond ONLY in ${targetLang}.`
+      : 'Detect the user language and reply naturally in that language.';
+
     const systemPrompt = `You are a DataVis Web Application assistant with access to the official user guide.
 
 ${userGuideDoc}
+
+${languageInstruction}
 
 RESPONSE FORMAT RULES:
 1. **Use Markdown formatting** for better readability:
@@ -126,7 +139,7 @@ EXAMPLE RESPONSE FORMAT:
 
 ---
 
-IMPORTANT: Speak naturally about UI elements users can see. DON'T expose technical implementation details. Language: ${targetLang}.`;
+IMPORTANT: Speak naturally about UI elements users can see. DON'T expose technical implementation details. Sure to use follow requirement => Requirement Language: ${targetLang}.`;
 
     const modelMessages = [
       { role: 'system', content: systemPrompt },
@@ -155,6 +168,411 @@ IMPORTANT: Speak naturally about UI elements users can see. DON'T expose technic
 
   cleanAnswer(raw: string) {
     return raw?.trim() || '';
+  }
+
+
+  /** ========================= AGENTIC AI & TOOLS ========================= */
+  async processUserRequest(
+    userId: string,
+    message: string,
+    historyJson?: string,
+    languageCode?: string
+  ): Promise<{
+    success: boolean;
+    reply?: string;
+    action?: 'create_chart' | 'list_datasets' | 'clean_data' | 'general_chat' | 'search_documentation';
+    params?: any;
+    processingTime?: string;
+    language?: string;
+  }> {
+    if (!message) throw new Error('Message is required');
+    if (!this.apiKey) throw new InternalServerErrorException('AI service is not configured');
+
+    const targetLang = languageCode || 'auto';
+
+    // Parse history
+    interface HistMsg { role: 'user' | 'assistant' | 'system'; content: string; }
+    let history: HistMsg[] = [];
+    if (historyJson) {
+      try {
+        const parsed = JSON.parse(historyJson);
+        if (Array.isArray(parsed))
+          history = parsed.filter(m => m && (m.role === 'user' || m.role === 'assistant') && typeof m.content === 'string');
+      } catch { }
+    }
+
+
+
+    // ... inside processUserRequest ...
+
+    const tools = [
+      {
+        type: 'function',
+        function: {
+          name: AI_TOOLS.CREATE_CHART.name,
+          description: AI_TOOLS.CREATE_CHART.description,
+          parameters: {
+            type: 'object',
+            properties: {
+              description: {
+                type: 'string',
+                description: 'Description of the chart to create (e.g. "bar chart of sales over time")',
+              },
+              datasetId: {
+                type: 'string',
+                description: 'Dataset ID selected by user. If missing, list datasets first.'
+              },
+              headers: {
+                type: 'array',
+                description: 'Optional dataset headers (id, name, type). If absent, service will fetch.',
+                items: {
+                  type: 'object',
+                  properties: {
+                    id: { type: 'string' },
+                    name: { type: 'string' },
+                    type: { type: 'string' }
+                  }
+                }
+              },
+              chartType: {
+                type: 'string',
+                enum: ['line', 'bar', 'pie', 'donut', 'area', 'scatter', 'heatmap', 'cycleplot', 'histogram', 'auto'],
+                description: 'The specific chart type if requested, or "auto".',
+              },
+            },
+            required: ['description'],
+          },
+        },
+      },
+      {
+        type: 'function',
+        function: {
+          name: AI_TOOLS.LIST_DATASETS.name,
+          description: AI_TOOLS.LIST_DATASETS.description,
+          parameters: { type: 'object', properties: {} },
+        },
+      },
+      {
+        type: 'function',
+        function: {
+          name: AI_TOOLS.CLEAN_DATA.name,
+          description: AI_TOOLS.CLEAN_DATA.description,
+          parameters: {
+            type: 'object',
+            properties: {
+              instructions: { type: 'string', description: 'Cleaning instructions if provided' }
+            }
+          },
+        },
+      },
+      {
+        type: 'function',
+        function: {
+          name: AI_TOOLS.SEARCH_DOCUMENTATION.name,
+          description: AI_TOOLS.SEARCH_DOCUMENTATION.description,
+          parameters: {
+            type: 'object',
+            properties: {
+              query: { type: 'string', description: 'The search query or question' }
+            },
+            required: ['query'],
+          },
+        },
+      },
+      {
+        type: 'function',
+        function: {
+          name: AI_TOOLS.CREATE_DATASET.name,
+          description: AI_TOOLS.CREATE_DATASET.description,
+          parameters: {
+            type: 'object',
+            properties: {
+              description: {
+                type: 'string',
+                description: 'Detailed description of the dataset to generate (e.g. "10 students with name, age, grade").',
+              },
+            },
+            required: ['description'],
+          },
+        },
+      },
+    ];
+
+    const systemPrompt = `${AI_SYSTEM_PROMPT}
+     Current Date: ${new Date().toISOString().split('T')[0]}`;
+
+    const modelMessages = [
+      { role: 'system', content: systemPrompt },
+      ...history.slice(-10), // Reduced history for efficiency
+      { role: 'user', content: message },
+    ];
+
+    try {
+      this.logger.log(`[Agent] Processing request: "${message}"`);
+
+      const res = await fetch(`${this.baseUrl}/chat/completions`, {
+        method: 'POST',
+        headers: this.getCommonHeaders(this.apiKey),
+        body: JSON.stringify({
+          model: this.model,
+          messages: modelMessages,
+          tools: tools,
+          tool_choice: 'auto',
+          temperature: 0,
+        }),
+      });
+
+      if (!res.ok) {
+        const text = await res.text();
+        this.logger.error(`AI API Error: ${res.status} ${text}`);
+        throw new InternalServerErrorException('Failed to contact AI');
+      }
+
+      const data = await res.json();
+      const choice = data?.choices?.[0];
+      const messageResponse = choice?.message;
+      const toolCalls = messageResponse?.tool_calls;
+
+      // Case 1: Tool Call
+      if (toolCalls && toolCalls.length > 0) {
+        const firstTool = toolCalls[0];
+        const functionName = firstTool.function.name;
+        const args = JSON.parse(firstTool.function.arguments || '{}');
+
+        this.logger.warn(`[Agent] 🤖 TOOL SELECTED: ${functionName}`);
+        this.logger.log(`[Agent] Args: ${JSON.stringify(args)}`);
+
+        // Handle 'search_documentation' internally (Recursion)
+        if (functionName === 'search_documentation') {
+          return this.handleDocumentationSearch(args.query, history, targetLang);
+        }
+
+        // Handle 'create_dataset' internally
+        if (functionName === 'create_dataset') {
+          // We need userId here. The signature of processUserRequest has userId.
+          return this.handleCreateDataset(userId, args.description, targetLang);
+        }
+
+        if (functionName === 'create_chart') {
+          // If user has not selected a dataset yet, prompt FE to show the list
+          if (!args.datasetId) {
+            const datasets = await this.datasetsService.findAll(userId);
+            this.logger.warn('[Agent] No dataset selected. Returning dataset list.');
+            return {
+              success: true,
+              action: 'list_datasets',
+              params: { datasets, originalMessage: message, requestedChart: args.description, chartType: args.chartType },
+              reply: 'Please choose a dataset to continue creating the chart.',
+              language: targetLang,
+            };
+          }
+
+          // If datasetId is present but headers are missing, fetch headers
+          if (args.datasetId && (!args.headers || !Array.isArray(args.headers) || args.headers.length === 0)) {
+            this.logger.log(`[Agent] Fetching dataset headers for datasetId: ${args.datasetId}`);
+            const dataset = await this.datasetsService.findOne(args.datasetId, userId);
+            if (!dataset) {
+              this.logger.error(`[Agent] Dataset not found for id: ${args.datasetId}`);
+              return { success: false, reply: `Dataset not found for id: ${args.datasetId}` };
+            }
+            // Build headers array for chart config
+            args.headers = (dataset.headers || []).map((h: any) => ({
+              id: h.id || h.name,
+              name: h.name,
+              type: h.type,
+            }));
+          }
+          // Now call generateChartConfig with all info
+          try {
+            const chartConfig = await this.generateChartConfig({
+              prompt: args.description || '',
+              datasetId: args.datasetId,
+              headers: args.headers,
+              chartType: args.chartType || 'auto',
+            });
+            return {
+              success: true,
+              action: 'create_chart',
+              params: chartConfig,
+              language: targetLang,
+            };
+          } catch (err: any) {
+            this.logger.error(`[Agent] Failed to generate chart config: ${err.message}`);
+            return { success: false, reply: err.message };
+          }
+        }
+
+        // Return other actions to Controller
+        return {
+          success: true,
+          action: functionName as any,
+          params: args,
+          language: targetLang
+        };
+      }
+
+      // Case 2: Normal Text Reply (No tool)
+      this.logger.log(`[Agent] 💬 Direct Reply (No tool needed)`);
+      return {
+        success: true,
+        reply: this.cleanAnswer(messageResponse?.content),
+        action: 'general_chat',
+        language: targetLang,
+      };
+
+    } catch (e) {
+      this.logger.error(`[Agent] Error: ${e.message}`);
+      // Fallback if tool calling fails
+      return { success: false, reply: 'I encountered an error processing your request.' };
+    }
+  }
+
+  // Internal handler for documentation search (RAG-lite)
+  private async handleDocumentationSearch(query: string, history: any[], targetLang: string) {
+    this.logger.warn(`[Agent] 📖 LOADING USER GUIDE for query: "${query}"`);
+    this.logger.warn(`[Agent] This is the ONLY time the full guide is added to context.`);
+
+    const userGuide = await this.loadUserGuide();
+
+    const systemPrompt = `You are a helpful assistant for DataVis App.
+    The user asked: "${query}"
+    
+    Here is the OFFICIAL USER GUIDE:
+    ===
+    ${userGuide}
+    ===
+    
+    Answer the user's question explicitly based on the guide above.
+    - If the info is in the guide, cite the step-by-step instructions.
+    - If not found, say you don't know but suggest checking the "Charts" or "Datasets" page.
+    - Format with Markdown (bold, lists).
+    - Reply in ${targetLang}.`;
+
+    const modelMessages = [
+      { role: 'system', content: systemPrompt },
+      ...history.slice(-2), // Minimal context
+      { role: 'user', content: query }
+    ];
+
+    const res = await fetch(`${this.baseUrl}/chat/completions`, {
+      method: 'POST',
+      headers: this.getCommonHeaders(this.apiKey),
+      body: JSON.stringify({
+        model: this.model,
+        messages: modelMessages,
+        temperature: 0.2, // Low temp for factual answers
+      }),
+    });
+
+    const data = await res.json();
+    const reply = this.cleanAnswer(data?.choices?.[0]?.message?.content);
+
+    return {
+      success: true,
+      reply: reply,
+      action: 'search_documentation' as const, // Informative action
+      language: targetLang
+    };
+  }
+
+  // Internal handler for dataset creation
+  private async handleCreateDataset(userId: string, description: string, targetLang: string) {
+    this.logger.log(`[Agent] 🧬 GENERATING DATASET: "${description}"`);
+
+    const systemPrompt = `You are a synthetic data generator. 
+    User Request: "${description}"
+    
+    Generate a JSON object representing a dataset based on the description.
+    
+    STRICT JSON OUTPUT FORMAT:
+    {
+      "name": "string (dataset name)",
+      "description": "string (short description)",
+      "headers": [
+        {
+          "name": "string (column name)",
+          "type": "string (number | string | date)",
+          "data": [ ...values... ]
+        }
+      ]
+    }
+
+    Rules:
+    - Generate realistic data.
+    - "data" array length must match the requested row count (default to 10 if not specified).
+    - Ensure all columns have the same number of rows.
+    - For date columns, use ISO strings (YYYY-MM-DD).
+    - Output ONLY valid JSON. No markdown blocks.`;
+
+    const res = await fetch(`${this.baseUrl}/chat/completions`, {
+      method: 'POST',
+      headers: this.getCommonHeaders(this.apiKey),
+      body: JSON.stringify({
+        model: this.model,
+        messages: [{ role: 'system', content: systemPrompt }, { role: 'user', content: description }],
+        temperature: 0.7, // Higher temp for creative data generation
+        response_format: { type: 'json_object' }
+      }),
+    });
+
+    try {
+      const data = await res.json();
+      const content = data?.choices?.[0]?.message?.content;
+      if (!content) throw new Error('Empty AI response');
+
+      const datasetData = JSON.parse(content);
+
+      // Validate structure basics
+      if (!datasetData.name || !Array.isArray(datasetData.headers)) {
+        throw new Error('Invalid generated data structure');
+      }
+
+      // Transform to DTO
+      const dto: CreateDatasetDto = {
+        name: datasetData.name,
+        description: datasetData.description,
+        headers: datasetData.headers.map((h: any, idx: number) => ({
+          name: h.name,
+          type: h.type === 'date' ? 'date' : h.type === 'number' ? 'number' : 'string',
+          index: idx,
+          data: h.data
+        })),
+        thousandsSeparator: ',',
+        decimalSeparator: '.'
+      };
+
+      // Call service
+      const newDataset = await this.datasetsService.create(dto, userId);
+
+      const replyMsg = targetLang === 'vi'
+        ? `Tôi đã tạo dataset "${newDataset.name}" thành công.`
+        : `I have successfully created the dataset "${newDataset.name}".`;
+
+      return {
+        success: true,
+        reply: replyMsg,
+        action: 'general_chat' as const,
+        language: targetLang,
+        data: { ...newDataset, url: '/workspace/datasets' },
+        createdDataset: { ...newDataset, url: '/workspace/datasets' } // Explicit return for FE
+      };
+
+    } catch (e) {
+      this.logger.error(`[handleCreateDataset] Failed: ${e.message}`);
+      return {
+        success: false,
+        reply: e.message,
+        language: targetLang
+      };
+    }
+  }
+
+  /**
+   * @deprecated logic moved to processUserRequest
+   */
+  async detectIntent(message: string): Promise<'create_chart' | 'list_datasets' | 'clean_data' | 'general_chat'> {
+    // Legacy fallback or just remove usage in controller
+    return 'general_chat';
   }
 
   /** ========================= CSV CLEAN ========================= */
@@ -815,7 +1233,7 @@ IMPORTANT: Speak naturally about UI elements users can see. DON'T expose technic
 
     return { data: cleaned.data, rowCount: cleaned.rowCount, columnCount: cleaned.columnCount };
   }
-   async generateChartConfig(input: {
+  async generateChartConfig(input: {
     prompt: string;
     datasetId: string;
     headers: Array<{ id: string; name: string; type: string }>;
@@ -1095,6 +1513,7 @@ ALL chart types must have BOTH:
 **Important Rules:**
 - ALWAYS use column IDs from dataset headers for keys.
 - ALWAYS use column NAMES from dataset headers for labels (xAxisLabel, yAxisLabel, series name).
+- Auto-select the best xAxisKey/series/value keys based on types and the user prompt; DO NOT ask the user to choose columns.
 - For line/bar/area/scatter: Include BOTH root properties AND nested config/formatters/axisConfigs.
 - Set xAxisKey and yAxisKeys at root as EMPTY ("" and []) - real values go in axisConfigs.
 - Choose appropriate numeric columns for values.
@@ -1170,11 +1589,11 @@ Generate a chart configuration that best matches this request.`;
       );
     }
   }
-    async forecast(options?: {
+  async forecast(options?: {
     csvData?: string;
     targetColumn?: string;
     featureColumns?: string[];
-    timeScale?: string;
+    modelType?: string;
     forecastWindow?: number;
   }) {
     this.logger.log('[forecast] Starting forecast execution');
@@ -1186,14 +1605,28 @@ Generate a chart configuration that best matches this request.`;
     if (!options?.targetColumn) {
       throw new BadRequestException('Target column is required for forecast');
     }
+    if (!options?.modelType) {
+      throw new BadRequestException('Model type is required for forecast (SVR or LSTM)');
+    }
+    if (!options?.forecastWindow) {
+      throw new BadRequestException('Forecast window is required for forecast');
+    }
 
-    this.logger.log('[forecast] Running in PRODUCTION MODE with real dataset');
+    this.logger.log('[forecast] Running forecast script');
 
-    const isProduction = __dirname.includes('dist');
-    const baseDir = isProduction
-      ? path.join(__dirname, '..', '..', '..', 'src', 'modules', 'ai')
-      : __dirname;
-    const scriptPath = path.join(baseDir, 'ai-model', 'AI_Training.py');
+    // Resolve project root and Python script path
+    // Use process.cwd() so it works the same in dev and after build,
+    // assuming the Nest app is started from the BE_WEB project root.
+    const projectRoot = process.cwd();
+
+    const scriptPath = path.join(
+      projectRoot,
+      'src',
+      'modules',
+      'ai',
+      'ai-model',
+      'AI_Training.py',
+    );
 
     // Check if script exists
     if (!fs.existsSync(scriptPath)) {
@@ -1202,8 +1635,13 @@ Generate a chart configuration that best matches this request.`;
     }
 
     const scriptDir = path.dirname(scriptPath);
-    const projectRoot = path.resolve(scriptDir, '..', '..', '..', '..');
-    const venvPythonPath = path.resolve(projectRoot, 'venv_tf', 'Scripts', 'python.exe');
+    // Tự động nhận diện OS để chọn python venv đúng
+    const isWin = process.platform === 'win32';
+    const venvPythonPath = path.resolve(
+      projectRoot,
+      'venv_tf',
+      isWin ? 'Scripts/python.exe' : 'bin/python'
+    );
 
     // Log paths for debugging
     this.logger.debug(`[forecast] Script dir: ${scriptDir}`);
@@ -1243,16 +1681,10 @@ Generate a chart configuration that best matches this request.`;
       PYTHONPATH: '', // Clear PYTHONPATH to avoid conflicts with D:\python-packages
     };
 
-    // Add forecast parameters as environment variables
-    if (options?.targetColumn) {
-      pythonEnv.TARGET_COLUMN = options.targetColumn;
-    }
-    if (options?.timeScale) {
-      pythonEnv.TIME_SCALE = options.timeScale;
-    }
-    if (options?.forecastWindow) {
-      pythonEnv.FORECAST_WINDOW = options.forecastWindow.toString();
-    }
+    // Add forecast parameters as environment variables (all required, validated above)
+    pythonEnv.TARGET_COLUMN = options.targetColumn;
+    pythonEnv.MODEL_TYPE = options.modelType;
+    pythonEnv.FORECAST_WINDOW = options.forecastWindow.toString();
 
     this.logger.log(`[forecast] Using dataset CSV data and forecast parameters`);
 
@@ -1347,17 +1779,27 @@ Generate a chart configuration that best matches this request.`;
 
         if (jsonStartIndex !== -1 && jsonEndIndex !== -1) {
           try {
-            const jsonText = stdoutText.substring(
+            // Extract JSON text between markers, removing any newlines that might have been inserted
+            let jsonText = stdoutText.substring(
               jsonStartIndex + jsonStartMarker.length,
               jsonEndIndex
             ).trim();
+
+            // Remove any newlines that might have been inserted by stdout line splitting
+            // The JSON should be on a single line, so replace newlines with spaces
+            jsonText = jsonText.replace(/\n/g, ' ').replace(/\r/g, '').replace(/\s+/g, ' ').trim();
+
             this.logger.log(`[forecast] Extracted JSON text length: ${jsonText.length} chars`);
             this.logger.log(`[forecast] First 200 chars of JSON: ${jsonText.substring(0, 200)}`);
+            this.logger.log(`[forecast] Last 200 chars of JSON: ${jsonText.substring(Math.max(0, jsonText.length - 200))}`);
+
             forecastData = JSON.parse(jsonText);
             this.logger.log(`[forecast] Successfully parsed forecast JSON data. Predictions: ${forecastData.predictions?.length || 0}`);
           } catch (parseError: any) {
             this.logger.warn(`[forecast] Failed to parse forecast JSON: ${parseError.message}`);
-            this.logger.warn(`[forecast] JSON text that failed: ${stdoutText.substring(jsonStartIndex + jsonStartMarker.length, jsonEndIndex).substring(0, 500)}`);
+            const failedJsonText = stdoutText.substring(jsonStartIndex + jsonStartMarker.length, jsonEndIndex);
+            this.logger.warn(`[forecast] JSON text length: ${failedJsonText.length} chars`);
+            this.logger.warn(`[forecast] JSON text around error position: ${failedJsonText.substring(Math.max(0, 4600), Math.min(failedJsonText.length, 4650))}`);
           }
         } else {
           this.logger.warn(`[forecast] JSON markers not found in stdout. Last 500 chars of stdout: ${stdoutText.slice(-500)}`);
@@ -1384,7 +1826,7 @@ Generate a chart configuration that best matches this request.`;
           try {
             const scriptDir = path.dirname(scriptPath);
             const sourceImagePath = path.join(scriptDir, 'forecast_plot.png');
-            
+
             if (fs.existsSync(sourceImagePath)) {
               // Create public/uploads/forecasts directory if it doesn't exist
               const publicDir = path.join(projectRoot, 'public', 'uploads', 'forecasts');
