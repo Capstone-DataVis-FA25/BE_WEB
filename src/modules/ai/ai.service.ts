@@ -428,33 +428,57 @@ IMPORTANT: Speak naturally about UI elements users can see. DON'T expose technic
     // Parse CSV text into rows
     const rows = this.csvToRows(csvText);
     if (!rows.length) throw new BadRequestException('No rows found in CSV');
-
     const header = rows[0];
     const defaultRowsPerChunk = 200;
-    const chunks: any[][][] = [];
-
-    // Split into chunks
+    const chunks: any[][] = [];
     for (let i = 1; i < rows.length; i += defaultRowsPerChunk) {
       chunks.push(rows.slice(i, i + defaultRowsPerChunk));
     }
 
-    this.logger.log(`[cleanLargeCsvText] Split into ${chunks.length} chunks`);
+    this.logger.log(`[cleanLargeCsvText] Initial split into ${chunks.length} row-chunks`);
 
-    const results: any[][][] = [];
-    const concurrency = Math.min(3, chunks.length);
-    const inflight: Promise<void>[] = [];
+    // Further split each row-based chunk into size-limited chunks (by CSV char length)
+    const effectiveChunks: any[][] = [];
+    for (let ci = 0; ci < chunks.length; ci++) {
+      const chunk = chunks[ci];
+      let current: any[][] = [];
+      for (let ri = 0; ri < chunk.length; ri++) {
+        const r = chunk[ri];
+        current.push(r);
+        const csv = await this.rowsToCsv([header, ...current]);
+        if (csv.length >= this.CLEAN_MAX_CHARS * 0.8) {
+          // remove last row and flush current
+          current.pop();
+          if (current.length === 0) {
+            // single row is already too large - push it as its own chunk (will be handled later)
+            effectiveChunks.push([r]);
+            current = [];
+          } else {
+            effectiveChunks.push(current.slice());
+            current = [r];
+          }
+        }
+      }
+      if (current.length) effectiveChunks.push(current.slice());
+    }
+
+    this.logger.log(`[cleanLargeCsvText] After size-splitting: ${effectiveChunks.length} effective chunks`);
+
+    // Prepare results placeholders to avoid sparse arrays
+    const totalChunks = effectiveChunks.length;
+    const results: any[][][] = new Array(totalChunks).fill(null).map(() => [header]);
+    const tasks: Promise<void>[] = [];
     let completedCount = 0;
 
     // Emit initial progress
-    if (options?.onProgress) {
-      options.onProgress(0, chunks.length);
-    }
+    if (options?.onProgress) options.onProgress(0, totalChunks);
+
+    const keepDuplicates = options?.keepDuplicates === true;
 
     const schedule = (chunk: any[][], idx: number) => {
       const task = (async () => {
         const subResults: any[][] = [];
 
-        // Sub-chunking logic (same as cleanLargeCsvToMatrix)
         const makeSubchunks = async (rows: any[][]) => {
           const out: any[][][] = [];
           let current: any[][] = [];
@@ -476,90 +500,90 @@ IMPORTANT: Speak naturally about UI elements users can see. DON'T expose technic
           return out;
         };
 
-        const subchunks = await makeSubchunks(chunk);
-
-        for (let subIndex = 0; subIndex < subchunks.length; subIndex++) {
-          const sub = subchunks[subIndex];
+        // processSubchunk will recursively split on 'too large' until single rows
+        const processSubchunk = async (sub: any[][], subIndex: number) => {
           const csv = await this.rowsToCsv([header, ...sub]);
-
           try {
             const cleaned = await this.cleanCsv({ csv, notes: options?.notes } as any);
             if (Array.isArray(cleaned?.data) && cleaned.data.length) {
-              subResults.push(...cleaned.data.slice(1)); // skip header
+              this.logger.log(`[cleanLargeCsvText] Chunk ${idx} sub ${subIndex}: input rows=${sub.length}, cleaned rows=${cleaned.data.length - 1}`);
+              subResults.push(...cleaned.data.slice(1));
             } else {
-              this.logger.warn(`Chunk ${idx} sub ${subIndex}: AI returned no cleaned rows`);
+              this.logger.warn(`[cleanLargeCsvText] Chunk ${idx} sub ${subIndex}: AI returned no cleaned rows, falling back to original rows`);
+              subResults.push(...sub);
             }
-          } catch (err) {
-            this.logger.error(`Chunk ${idx} sub ${subIndex} failed: ${err.message}`);
-
-            if (err.message?.includes('too large')) {
-              this.logger.log(`Chunk ${idx} sub ${subIndex} still too large, splitting further...`);
-
-              const midpoint = Math.floor(sub.length / 2);
-              if (midpoint > 0) {
-                const firstHalf = sub.slice(0, midpoint);
-                const secondHalf = sub.slice(midpoint);
-
-                try {
-                  const csv1 = await this.rowsToCsv([header, ...firstHalf]);
-                  const cleaned1 = await this.cleanCsv({ csv: csv1, notes: options?.notes } as any);
-                  if (Array.isArray(cleaned1?.data) && cleaned1.data.length) {
-                    subResults.push(...cleaned1.data.slice(1));
-                  }
-                } catch (err1) {
-                  this.logger.error(`First half of chunk ${idx}.${subIndex} failed: ${err1.message}`);
-                }
-
-                try {
-                  const csv2 = await this.rowsToCsv([header, ...secondHalf]);
-                  const cleaned2 = await this.cleanCsv({ csv: csv2, notes: options?.notes } as any);
-                  if (Array.isArray(cleaned2?.data) && cleaned2.data.length) {
-                    subResults.push(...cleaned2.data.slice(1));
-                  }
-                } catch (err2) {
-                  this.logger.error(`Second half of chunk ${idx}.${subIndex} failed: ${err2.message}`);
-                }
-              } else {
-                this.logger.error(`Cannot split further - single row too large`);
+          } catch (err: any) {
+            this.logger.error(`[cleanLargeCsvText] Chunk ${idx} sub ${subIndex} failed: ${err?.message || err}`);
+            // If it's a 'too large' error, split further
+            if (err?.message?.includes('Data chunk too large') || err?.message?.includes('too large')) {
+              if (sub.length <= 1) {
+                // Single row too large to process; keep original row to avoid data loss
+                this.logger.error(`[cleanLargeCsvText] Single row still too large, keeping original row to avoid data loss`);
+                subResults.push(...sub);
+                return;
               }
+              const midpoint = Math.floor(sub.length / 2);
+              const firstHalf = sub.slice(0, midpoint);
+              const secondHalf = sub.slice(midpoint);
+              await processSubchunk(firstHalf, subIndex * 2);
+              await processSubchunk(secondHalf, subIndex * 2 + 1);
+            } else {
+              // Non-splittable error - keep original rows to avoid data loss
+              this.logger.error(`[cleanLargeCsvText] Non-retriable error for chunk ${idx} sub ${subIndex}, keeping original rows`);
+              subResults.push(...sub);
             }
           }
+        };
+
+        const subchunks = await makeSubchunks(chunk);
+        for (let subIndex = 0; subIndex < subchunks.length; subIndex++) {
+          await processSubchunk(subchunks[subIndex], subIndex);
         }
 
+        // Write results for this chunk (always write, even if empty)
         results[idx] = [header, ...subResults];
 
-        // Report progress
         completedCount++;
-        if (options?.onProgress) {
-          options.onProgress(completedCount, chunks.length);
-        }
+        if (options?.onProgress) options.onProgress(completedCount, chunks.length);
       })();
 
-      inflight.push(task);
-      task.finally(() => {
-        const i = inflight.indexOf(task);
-        if (i >= 0) inflight.splice(i, 1);
-      });
+      tasks.push(task);
+      // leave task.finally minimal
+      task.finally(() => undefined);
       return task;
     };
 
-    chunks.forEach((chunk, idx) => schedule(chunk, idx));
-    await Promise.all(inflight);
+    // schedule all effective chunks (size-limited)
+    effectiveChunks.forEach((chunk, idx) => schedule(chunk, idx));
 
-    // Merge & deduplicate
+    const settled = await Promise.allSettled(tasks);
+    const rejected = settled.filter(s => s.status === 'rejected');
+    if (rejected.length) this.logger.warn(`[cleanLargeCsvText] ${rejected.length} chunk tasks rejected`);
+
+    // Merge results preserving order and avoiding holes
     const merged: any[][] = [header];
-    const seen = new Set<string>();
-    results.forEach(chunkRows => {
-      chunkRows.slice(1).forEach(row => {
-        const key = JSON.stringify(row);
-        if (!seen.has(key)) {
-          seen.add(key);
-          merged.push(row);
+    if (keepDuplicates) {
+      for (let i = 0; i < results.length; i++) {
+        const chunkRows = results[i];
+        if (!Array.isArray(chunkRows) || chunkRows.length <= 1) continue;
+        for (let j = 1; j < chunkRows.length; j++) merged.push(chunkRows[j]);
+      }
+      this.logger.log(`[cleanLargeCsvText] Completed, merged ${merged.length - 1} rows (duplicates kept)`);
+    } else {
+      const seen = new Set<string>();
+      for (let i = 0; i < results.length; i++) {
+        const chunkRows = results[i];
+        if (!Array.isArray(chunkRows) || chunkRows.length <= 1) continue;
+        for (let j = 1; j < chunkRows.length; j++) {
+          const row = chunkRows[j];
+          const key = JSON.stringify(row);
+          if (!seen.has(key)) { seen.add(key); merged.push(row); }
         }
-      });
-    });
+      }
+      this.logger.log(`[cleanLargeCsvText] Completed, merged ${merged.length - 1} rows (deduplicated)`);
+    }
 
-    this.logger.log(`[cleanLargeCsvText] Completed, merged ${merged.length - 1} rows (deduplicated)`);
+    return { data: merged, rowCount: merged.length, columnCount: merged[0]?.length || 0 };
 
     return { data: merged, rowCount: merged.length, columnCount: merged[0]?.length || 0 };
   }
