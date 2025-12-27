@@ -165,64 +165,106 @@ IMPORTANT: Speak naturally about UI elements users can see. DON'T expose technic
   private async sendCleanRequest(csvText: string, payload?: Partial<CleanCsvDto>): Promise<string> {
     const MAX_CHARS = 30_000; // Drastically reduced to avoid output token limits
     const MAX_TOKENS = 10_000; // Reduced input tokens
-    const MAX_OUTPUT_TOKENS = 8_000; // Reduced output token limit
+    const MAX_OUTPUT_TOKENS = 10_000; // Reduced output token limit
     const REQUEST_TIMEOUT = 60000; // 60 seconds
 
     this.logger.log(`[sendCleanRequest] Starting, CSV length: ${csvText.length}`);
 
-    // Build additional cleaning instructions based on user-selected options
-    const additionalInstructions: string[] = [];
+    // Build cleaning instructions driven by the payload. Do NOT hardcode rules
+    // that the user did not request — only include instructions for options
+    // explicitly present in the payload. Keep a minimal safe base.
+    const instructions: string[] = [];
 
-    if (payload?.removeOutliers === true) {
-      additionalInstructions.push('- Remove or cap outliers: detect numeric outliers using IQR method and cap them to reasonable bounds');
+    // Minimal required behavior
+    instructions.push('You are a data cleaning assistant. Clean the CSV data and return it in the "data" field as a 2D array. The first inner array must be the header row.');
+    instructions.push('Do NOT invent data, do NOT add new rows, do NOT change number or order of columns.');
+
+    // Apply explicit user options only
+    if (payload?.removeDuplicates === true) {
+      instructions.push('- Remove exact duplicate rows: keep the first occurrence and drop exact duplicates.');
     }
 
-    if (payload?.validateDomain === true) {
-      additionalInstructions.push('- Validate domain constraints: check if values make sense (e.g., age 0-120, valid email format)');
+    if (payload?.fixDataTypes === true) {
+      instructions.push('- Fix data types: convert numeric-like strings to numbers, parse dates when possible, and ensure consistent types per column.');
+    }
+
+    // Ensure numeric fills follow column type conventions (rounding)
+    instructions.push('- When filling numeric columns, detect if the column contains only integer values; if so, round any filled numeric values to the nearest integer and output without decimal places (this applies to age, counts, and similar fields). For columns that contain decimals, preserve a reasonable number of decimal places consistent with the column.');
+
+    // Determine effective strategies (prefer explicit strategy fields; fall back to boolean flags)
+    const rawMissingStrategy = (payload as any)?.missingStrategy;
+    const effectiveMissingStrategy = rawMissingStrategy ?? (payload?.handleMissingValues === true ? 'fill_mean' : 'fill_mean');
+
+    if (effectiveMissingStrategy === 'remove') {
+      instructions.push('- Remove rows that contain missing values (treat missing critical identifiers like ID/Name as reason to remove).');
+    } else if (effectiveMissingStrategy === 'fill_mean') {
+      instructions.push('- Fill missing values: for numeric columns use the mean (rounded according to column type), for categorical use the mode. Do NOT remove rows unless a critical identifier is missing.');
+    } else if (effectiveMissingStrategy === 'fill_mode') {
+      instructions.push('- Fill missing values using the mode (most common value) for categorical or numeric fields. Do NOT remove rows.');
+    } else { // 'auto' or any other
+      instructions.push('- For missing/empty values: if a row misses critical identifiers (e.g., ID or Name) remove it; otherwise, if >30% fields missing remove the row, if ≤30% fill missing values (mean for numeric, mode for categorical) and document filled values. Prefer filling when possible.');
+    }
+
+    const rawOutlierStrategy = (payload as any)?.outlierStrategy;
+    const effectiveOutlierStrategy = rawOutlierStrategy ?? (payload?.removeOutliers === true ? 'auto' : 'auto');
+    if (effectiveOutlierStrategy === 'remove') {
+      instructions.push('- Remove obvious numeric outliers using IQR or 3-sigma heuristics.');
+    } else if (effectiveOutlierStrategy === 'cap') {
+      instructions.push('- Cap numeric outliers to reasonable bounds using IQR or 3-sigma heuristics (do not drop rows).');
+    } else {
+      instructions.push('- Detect numeric outliers; prefer capping to dropping when unsure.');
+    }
+
+    if (payload?.standardizeFormats === true) {
+      instructions.push('- Standardize common formats: dates, phone numbers, and normalized capitalization where applicable.');
     }
 
     if (payload?.standardizeUnits === true) {
-      additionalInstructions.push('- Standardize units: convert all measurements to consistent units (e.g., km to m, lbs to kg)');
+      instructions.push('- Standardize units: convert measurements into consistent units (e.g., convert km→m, lbs→kg) when a unit is present or can be inferred.');
     }
 
-    // Base cleaning instructions (always applied)
-    const baseInstructions = [
-      '- Trim whitespace from all cells',
-      '- Remove exact duplicate rows (keep first occurrence)',
-      '- Standardize text case: capitalize proper names (cities, person names), use title case for multi-word fields',
-      '- For city names: standardize common variations (e.g., "Sài Gòn", "HCM", "ho chi minh", "Thành Phố Hồ Chí Minh" → all become "Ho Chi Minh")',
-      '- For person names: capitalize each word properly (e.g., "john doe", "JOHN DOE" → "John Doe")',
-      '- For gender field: standardize to "Male", "Female", "Other" (case-insensitive match)',
-      '- For numeric columns:',
-      '  * Remove all non-numeric characters except decimal separator',
-      `  * Apply thousand separator: ${payload?.thousandsSeparator || ' '}`,
-      `  * Apply decimal separator: ${payload?.decimalSeparator || '.'}`,
-      '  * Format numbers consistently (e.g., 1000 → 1,000 if thousand separator is comma)',
-      '  * Remove outliers that are clearly errors (e.g., weight=6000kg, height=1.70m, age=150)',
-      '- For missing/empty values - IMPORTANT RULES:',
-      '  * First check: if row has ID column and ID is missing → REMOVE the entire row',
-      '  * Second check: if row has name column and name is missing → REMOVE the entire row',
-      '  * Third check: count missing fields in the row:',
-      '    - If >30% fields missing → REMOVE the entire row',
-      '    - If ≤30% fields missing → KEEP row and fill ALL missing values using these rules:',
-      '  * For kept rows with missing values, fill based on column type:',
-      '    - Numeric columns (age, weight, height, income, etc.): calculate mean/median of that column, fill missing cells with the mean (rounded appropriately)',
-      '    - Text columns (city, name, status, etc.): find the MOST COMMON value (mode) in that column and fill missing cells with that value',
-      '    - Date columns: find the MOST COMMON date in that column and fill missing cells with that date',
-      '    - Gender/category columns: find the MOST COMMON category and fill missing cells with that value',
-      '  * IMPORTANT: Calculate mean/mode BEFORE filling, then apply to all missing cells in that column',
-      '  * Each row MUST have same number of columns as header',
-      '  * Do NOT remove columns, do NOT shift data, do NOT leave any empty cells',
-      '- For date columns: standardize to YYYY-MM-DD format',
-      '- Do NOT invent data, do NOT add new rows, do NOT skip columns'
-    ];
+    if (payload?.validateDomain === true) {
+      instructions.push('- Validate domain constraints for plausibility (e.g., age 0-120, reasonable salary ranges, valid email formats) and flag or fix obvious errors.');
+    }
 
-    // Combine base instructions with additional user-selected options
-    const allInstructions = [...baseInstructions, ...additionalInstructions];
+    // Numeric formatting / separators only when provided
+    if (payload?.thousandsSeparator) {
+      instructions.push(`- Use '${payload.thousandsSeparator}' as the thousands separator when formatting numbers.`);
+    }
+    if (payload?.decimalSeparator) {
+      instructions.push(`- Use '${payload.decimalSeparator}' as the decimal separator when parsing and formatting numbers.`);
+    }
 
-    const systemPrompt = (payload?.notes ? payload.notes + '\n\n' : '') +
-      'You are a data cleaning assistant. Clean the CSV data and return it in the "data" field as a 2D array. The first inner array is the header row.\n' +
-      allInstructions.join('\n');
+    // Date format preference
+    if (payload?.dateFormat) {
+      instructions.push(`- When standardizing dates, use the expected format: ${payload.dateFormat} (try to parse common formats and convert to this format).`);
+    }
+
+    // If the user supplied a schema example, include it as a guidance (do not force schema changes)
+    if (payload?.schemaExample) {
+      const examplePreview = String(payload.schemaExample).split('\n').slice(0, 5).join('\n');
+      instructions.push('- Use the provided schema/example to infer header names and expected column order when possible. Example (trimmed):');
+      instructions.push(examplePreview);
+    }
+
+    // Include any free-text notes the user provided at the very top
+    const notesPrefix = payload?.notes ? String(payload.notes).trim() + '\n\n' : '';
+
+    // Append a clear, explicit summary of the selected options so the AI
+    // follows the user's exact choices (avoid ambiguity from 'auto').
+    const selectedOptionsBlockLines: string[] = [];
+    selectedOptionsBlockLines.push('\n-- SELECTED OPTIONS FROM USER --');
+    selectedOptionsBlockLines.push(`missingStrategy: ${effectiveMissingStrategy}`);
+    selectedOptionsBlockLines.push(`outlierStrategy: ${effectiveOutlierStrategy}`);
+    selectedOptionsBlockLines.push(`removeDuplicates: ${Boolean(payload?.removeDuplicates)}`);
+    selectedOptionsBlockLines.push(`fixDataTypes: ${Boolean(payload?.fixDataTypes)}`);
+    selectedOptionsBlockLines.push(`standardizeFormats: ${Boolean(payload?.standardizeFormats)}`);
+    selectedOptionsBlockLines.push(`standardizeUnits: ${Boolean(payload?.standardizeUnits)}`);
+    if (payload?.thousandsSeparator) selectedOptionsBlockLines.push(`thousandsSeparator: ${payload?.thousandsSeparator}`);
+    if (payload?.decimalSeparator) selectedOptionsBlockLines.push(`decimalSeparator: ${payload?.decimalSeparator}`);
+    if (payload?.dateFormat) selectedOptionsBlockLines.push(`dateFormat: ${payload?.dateFormat}`);
+
+    const systemPrompt = notesPrefix + instructions.join('\n') + '\n' + selectedOptionsBlockLines.join('\n');
     const userPrompt = 'Original CSV:\n' + csvText;
 
     if (csvText.length > MAX_CHARS || this.estimateTokens(systemPrompt + userPrompt) > MAX_TOKENS) {
@@ -265,6 +307,30 @@ IMPORTANT: Speak naturally about UI elements users can see. DON'T expose technic
         },
       },
     };
+
+    // Log a safe, truncated preview of the request body for debugging
+    try {
+      const safeSystem = systemPrompt && systemPrompt.length > 1000 ? systemPrompt.slice(0, 1000) + '...[truncated]' : systemPrompt;
+      const safeUserPreview = userPrompt && userPrompt.length > 1000 ? userPrompt.slice(0, 1000) + `...[truncated ${userPrompt.length} chars]` : userPrompt;
+      const optionSummary = {
+        removeDuplicates: payload?.removeDuplicates,
+        fixDataTypes: payload?.fixDataTypes,
+        missingStrategy: (payload as any)?.missingStrategy ?? effectiveMissingStrategy,
+        outlierStrategy: (payload as any)?.outlierStrategy ?? effectiveOutlierStrategy,
+        standardizeFormats: payload?.standardizeFormats,
+        standardizeUnits: payload?.standardizeUnits,
+        validateDomain: payload?.validateDomain,
+        thousandsSeparator: payload?.thousandsSeparator,
+        decimalSeparator: payload?.decimalSeparator,
+        dateFormat: payload?.dateFormat,
+      };
+      this.logger.debug(`[sendCleanRequest] Request preview — model: ${this.model}, max_tokens: ${MAX_OUTPUT_TOKENS}, system_len: ${systemPrompt.length}, user_len: ${userPrompt.length}`);
+      this.logger.debug(`[sendCleanRequest] systemPreview: ${safeSystem}`);
+      this.logger.debug(`[sendCleanRequest] userPreview(first 1000 chars): ${safeUserPreview}`);
+      this.logger.debug(`[sendCleanRequest] options: ${JSON.stringify(optionSummary)}`);
+    } catch (previewErr) {
+      this.logger.debug(`[sendCleanRequest] Failed to build request preview: ${previewErr?.message || previewErr}`);
+    }
 
     const maxRetries = 4;
     for (let attempt = 0; attempt <= maxRetries; attempt++) {
@@ -483,7 +549,7 @@ IMPORTANT: Speak naturally about UI elements users can see. DON'T expose technic
           const csv = await this.rowsToCsv([header, ...sub]);
 
           try {
-            const cleaned = await this.cleanCsv({ csv, notes: options?.notes } as any);
+            const cleaned = await this.cleanCsv({ csv, ...(options || {}) } as any);
             if (Array.isArray(cleaned?.data) && cleaned.data.length) {
               subResults.push(...cleaned.data.slice(1)); // skip header
             } else {
@@ -502,7 +568,7 @@ IMPORTANT: Speak naturally about UI elements users can see. DON'T expose technic
 
                 try {
                   const csv1 = await this.rowsToCsv([header, ...firstHalf]);
-                  const cleaned1 = await this.cleanCsv({ csv: csv1, notes: options?.notes } as any);
+                  const cleaned1 = await this.cleanCsv({ csv: csv1, ...(options || {}) } as any);
                   if (Array.isArray(cleaned1?.data) && cleaned1.data.length) {
                     subResults.push(...cleaned1.data.slice(1));
                   }
@@ -512,7 +578,7 @@ IMPORTANT: Speak naturally about UI elements users can see. DON'T expose technic
 
                 try {
                   const csv2 = await this.rowsToCsv([header, ...secondHalf]);
-                  const cleaned2 = await this.cleanCsv({ csv: csv2, notes: options?.notes } as any);
+                  const cleaned2 = await this.cleanCsv({ csv: csv2, ...(options || {}) } as any);
                   if (Array.isArray(cleaned2?.data) && cleaned2.data.length) {
                     subResults.push(...cleaned2.data.slice(1));
                   }
@@ -584,11 +650,11 @@ IMPORTANT: Speak naturally about UI elements users can see. DON'T expose technic
     return rows.filter(r => (r || []).some(cell => String(cell ?? '').trim() !== ''));
   }
 
-  private csvToRows(csv: string): any[][] {
-    return csv.replace(/\r\n/g, '\n').split('\n').filter(l => l.trim() !== '').map(this.parseCsvLine);
+  private csvToRows(csv: string, payload?: any): any[][] {
+    return csv.replace(/\r\n/g, '\n').split('\n').filter(l => l.trim() !== '').map(line => this.parseCsvLine(line, payload));
   }
 
-  private parseCsvLine(line: string): string[] {
+  private parseCsvLine(line: string, payload?: any): string[] {
     const result: string[] = [];
     let current = '', inQuotes = false;
     for (let i = 0; i < line.length; i++) {
@@ -605,7 +671,6 @@ IMPORTANT: Speak naturally about UI elements users can see. DON'T expose technic
     result.push(current);
     return result;
   }
-
   private async rowsToCsv(rows: any[][]): Promise<string> {
     const escapeCell = (v: any) => {
       const s = String(v ?? '').trim();
