@@ -170,30 +170,15 @@ IMPORTANT: Speak naturally about UI elements users can see. DON'T expose technic
 
     this.logger.log(`[sendCleanRequest] Starting, CSV length: ${csvText.length}`);
 
-    // Build cleaning instructions driven by the payload. Do NOT hardcode rules
-    // that the user did not request — only include instructions for options
-    // explicitly present in the payload. Keep a minimal safe base.
-    const instructions: string[] = [];
-
-    // Minimal required behavior
-    instructions.push('You are a data cleaning assistant. Clean the CSV data and return it in the "data" field as a 2D array. The first inner array must be the header row.');
-    instructions.push('Do NOT invent data, do NOT add new rows, do NOT change number or order of columns.');
-
-    // Apply explicit user options only
-    if (payload?.removeDuplicates === true) {
-      instructions.push('- Remove exact duplicate rows: keep the first occurrence and drop exact duplicates.');
-    }
-
-    if (payload?.fixDataTypes === true) {
-      instructions.push('- Fix data types: convert numeric-like strings to numbers, parse dates when possible, and ensure consistent types per column.');
-    }
-
-    // Ensure numeric fills follow column type conventions (rounding)
-    instructions.push('- When filling numeric columns, detect if the column contains only integer values; if so, round any filled numeric values to the nearest integer and output without decimal places (this applies to age, counts, and similar fields). For columns that contain decimals, preserve a reasonable number of decimal places consistent with the column.');
-
-    // Determine effective strategies (prefer explicit strategy fields; fall back to boolean flags)
+    // Use a canonical, strict system prompt designed to make the model reliably
+    // return clean CSV data in the required JSON shape and to avoid destructive
+    // behavior (like inventing or deleting rows) even under ambiguous 'auto' settings.
+    // The selected options block (appended below) still drives strategy choices.
     const rawMissingStrategy = (payload as any)?.missingStrategy;
     const effectiveMissingStrategy = rawMissingStrategy ?? (payload?.handleMissingValues === true ? 'fill_mean' : 'fill_mean');
+
+    // Declare instructions array
+    const instructions: string[] = [];
 
     if (effectiveMissingStrategy === 'remove') {
       instructions.push('- Remove rows that contain missing values (treat missing critical identifiers like ID/Name as reason to remove).');
@@ -207,45 +192,6 @@ IMPORTANT: Speak naturally about UI elements users can see. DON'T expose technic
 
     const rawOutlierStrategy = (payload as any)?.outlierStrategy;
     const effectiveOutlierStrategy = rawOutlierStrategy ?? (payload?.removeOutliers === true ? 'auto' : 'auto');
-    if (effectiveOutlierStrategy === 'remove') {
-      instructions.push('- Remove obvious numeric outliers using IQR or 3-sigma heuristics.');
-    } else if (effectiveOutlierStrategy === 'cap') {
-      instructions.push('- Cap numeric outliers to reasonable bounds using IQR or 3-sigma heuristics (do not drop rows).');
-    } else {
-      instructions.push('- Detect numeric outliers; prefer capping to dropping when unsure.');
-    }
-
-    if (payload?.standardizeFormats === true) {
-      instructions.push('- Standardize common formats: dates, phone numbers, and normalized capitalization where applicable.');
-    }
-
-    if (payload?.standardizeUnits === true) {
-      instructions.push('- Standardize units: convert measurements into consistent units (e.g., convert km→m, lbs→kg) when a unit is present or can be inferred.');
-    }
-
-    if (payload?.validateDomain === true) {
-      instructions.push('- Validate domain constraints for plausibility (e.g., age 0-120, reasonable salary ranges, valid email formats) and flag or fix obvious errors.');
-    }
-
-    // Numeric formatting / separators only when provided
-    if (payload?.thousandsSeparator) {
-      instructions.push(`- Use '${payload.thousandsSeparator}' as the thousands separator when formatting numbers.`);
-    }
-    if (payload?.decimalSeparator) {
-      instructions.push(`- Use '${payload.decimalSeparator}' as the decimal separator when parsing and formatting numbers.`);
-    }
-
-    // Date format preference
-    if (payload?.dateFormat) {
-      instructions.push(`- When standardizing dates, use the expected format: ${payload.dateFormat} (try to parse common formats and convert to this format).`);
-    }
-
-    // If the user supplied a schema example, include it as a guidance (do not force schema changes)
-    if (payload?.schemaExample) {
-      const examplePreview = String(payload.schemaExample).split('\n').slice(0, 5).join('\n');
-      instructions.push('- Use the provided schema/example to infer header names and expected column order when possible. Example (trimmed):');
-      instructions.push(examplePreview);
-    }
 
     // Include any free-text notes the user provided at the very top
     const notesPrefix = payload?.notes ? String(payload.notes).trim() + '\n\n' : '';
@@ -264,7 +210,48 @@ IMPORTANT: Speak naturally about UI elements users can see. DON'T expose technic
     if (payload?.decimalSeparator) selectedOptionsBlockLines.push(`decimalSeparator: ${payload?.decimalSeparator}`);
     if (payload?.dateFormat) selectedOptionsBlockLines.push(`dateFormat: ${payload?.dateFormat}`);
 
-    const systemPrompt = notesPrefix + instructions.join('\n') + '\n' + selectedOptionsBlockLines.join('\n');
+    const canonicalSystemPrompt = `Bạn là một trợ lý làm sạch dữ liệu rất chính xác. Thực hiện đúng các quy tắc bên dưới và CHỈ trả về một đối tượng JSON như mục "RESPONSE FORMAT" yêu cầu — không được thêm bình luận hay text khác.
+
+NGUYÊN TẮC CHUNG:
+1) KHÔNG phát minh dữ liệu. Không thêm hàng mới. Không thay đổi số cột, thứ tự cột hay tên cột.
+2) GIỮ nguyên giá trị gốc nếu việc sửa sẽ phải đoán (nếu không chắc chắn, để nguyên).
+3) Ưu tiên GIỮ hàng; chỉ XÓA hàng khi chiến lược trong SELECTED OPTIONS yêu cầu 'remove' và hàng thiếu identifier quan trọng (ID/Name).
+4) MISSING: làm theo SELECTED OPTIONS — 'fill_mean' / 'fill_mode' / 'remove'. Nếu fill: numeric dùng mean (làm tròn theo quy tắc cột), categorical dùng mode.
+5) INTEGER ROUNDED FILL: Nếu cột là integer-like (ví dụ age, counts) thì mọi giá trị fill phải làm tròn thành số nguyên và trả về không có dấu thập phân (ví dụ "25"). Nếu cột có thập phân, giữ độ chính xác hợp lý.
+6) DATES: Chuẩn hóa mọi ngày theo định dạng ISO YYYY-MM-DD. Nếu không thể parse hợp lệ, GIỮ nguyên chuỗi ban đầu (ví dụ "1980-01-32" vẫn trả về "1980-01-32").
+7) UNITS: Chuẩn hóa units khi rõ ràng (weight → kg 1 chữ số thập phân; height → cm integer). Nếu unit không chắc, giữ nguyên.
+8) OUTLIERS: làm theo SELECTED OPTIONS — ưu tiên cap (giới hạn) hơn xóa nếu không chắc.
+9) DUPLICATES: nếu SELECTED OPTIONS yêu cầu removeDuplicates=true thì xóa trùng chính xác, giữ bản đầu tiên.
+10) SỐ: Khi parsing số, dùng thousandsSeparator và decimalSeparator từ SELECTED OPTIONS nếu có.
+11) KẾT QUẢ TẤT CẢ PHẦN TỬ: Mỗi ô phải là chuỗi JSON (đóng bằng dấu ngoặc kép).
+
+SELECTED OPTIONS (chèn chính xác từ client):
+missingStrategy: <remove|fill_mean|fill_mode|auto>
+outlierStrategy: <remove|cap|auto>
+removeDuplicates: <true|false>
+thousandsSeparator: <'.' or ',' or ''>
+decimalSeparator: <'.' or ',' or ''>
+standardizeUnits: <true|false>
+standardizeFormats: <true|false>
+
+RESPONSE FORMAT (bắt buộc — trả về đúng định dạng và KHÔNG có text khác):
+{
+  "data": [
+    ["col1","col2","col3",...],
+    ["r1c1","r1c2","r1c3",...],
+    ...
+  ]
+}
+
+Ví dụ ngắn:
+Input header: ["id","name","age","date_of_birth","weight"]
+- Nếu age = 25.5 và cột là integer-like → trả "25"
+- Nếu date_of_birth = "1980-01-32" (invalid) → trả "1980-01-32"
+- Nếu weight = "700g" → trả "0.7" (kg, một chữ số thập phân) nếu SELECTED OPTIONS.standardizeUnits = true
+
+Thực hiện theo quy tắc này CHÍNH XÁC và chỉ trả về JSON theo "RESPONSE FORMAT".`;
+
+    const systemPrompt = notesPrefix + canonicalSystemPrompt + '\n' + selectedOptionsBlockLines.join('\n');
     const userPrompt = 'Original CSV:\n' + csvText;
 
     if (csvText.length > MAX_CHARS || this.estimateTokens(systemPrompt + userPrompt) > MAX_TOKENS) {
@@ -433,6 +420,10 @@ IMPORTANT: Speak naturally about UI elements users can see. DON'T expose technic
     const csvText = (payload?.csv ?? '').toString();
     if (!csvText) throw new BadRequestException('CSV is empty');
 
+    // Keep a copy of original rows so we can restore cells when the AI
+    // returns obvious placeholders (e.g. '?', 'n/a') or otherwise invalid tokens.
+    const originalRows = this.csvToRows(csvText);
+
     this.logger.log(`[cleanCsv] Starting, CSV length: ${csvText.length} chars`);
     this.logger.debug(`[cleanCsv] API key configured: ${this.apiKey ? 'YES' : 'NO'}`);
     this.logger.debug(`[cleanCsv] Model: ${this.model}`);
@@ -481,7 +472,272 @@ IMPORTANT: Speak naturally about UI elements users can see. DON'T expose technic
 
     this.logger.log(`[cleanCsv] Parsed ${rows.length} rows`);
 
+    // If AI returned placeholder tokens or obvious invalid markers, prefer
+    // restoring the original cell value from the uploaded CSV rather than
+    // propagating '?' or 'n/a' into the cleaned dataset.
+    try {
+      const placeholderPattern = /^(\?|\s*-\s*|n\/?a|na|null|none)$/i;
+      const maxR = Math.min(rows.length, originalRows.length);
+      const issues: Array<{ row: number; col: number; header?: string; got: string; restored?: string }> = [];
+
+      for (let r = 1; r < maxR; r++) {
+        const outRow = rows[r] || [];
+        const origRow = originalRows[r] || [];
+        for (let c = 0; c < outRow.length; c++) {
+          const outVal = String(outRow[c] ?? '').trim();
+          if (!outVal) continue; // empty string — skip
+          if (placeholderPattern.test(outVal)) {
+            const origVal = String(origRow[c] ?? '').trim();
+            if (origVal && origVal !== outVal) {
+              issues.push({ row: r + 1, col: c + 1, header: String(rows[0]?.[c] ?? ''), got: outVal, restored: origVal });
+              rows[r][c] = origVal;
+            }
+          }
+        }
+      }
+
+      if (issues.length) {
+        this.logger.warn(`[cleanCsv] Replaced ${issues.length} placeholder cells with original values to avoid data loss. Example: ${JSON.stringify(issues.slice(0,3))}`);
+      }
+    } catch (e) {
+      this.logger.warn(`[cleanCsv] Placeholder restoration failed: ${e?.message || e}`);
+    }
+
+    // Server-side normalization for date-like columns to ensure consistent YYYY-MM-DD
+    try {
+      const headers = rows[0] || [];
+      const dateColIndexes: number[] = [];
+      headers.forEach((h: string, idx: number) => {
+        if (String(h || '').toLowerCase().match(/date|dob|birth|born|ngay|year/)) dateColIndexes.push(idx);
+      });
+
+      if (dateColIndexes.length) {
+        for (let r = 1; r < rows.length; r++) {
+          const row = rows[r];
+          for (const ci of dateColIndexes) {
+            const raw = String(row[ci] ?? '').trim();
+            if (!raw) continue;
+            const normalized = this.normalizeDateString(raw, payload?.dateFormat);
+            // If we can't normalize, keep the original raw value instead of clearing it
+            row[ci] = normalized ?? raw;
+          }
+        }
+      }
+    } catch (e) {
+      this.logger.warn(`[cleanCsv] Date normalization failed: ${e?.message || e}`);
+    }
+
+    // Server-side normalization for numeric, gender, height, weight and age columns
+    try {
+      const headers = rows[0] || [];
+      const sampleSize = Math.min(50, rows.length - 1);
+
+      const detectIntegerLike = (colIdx: number) => {
+        let intCount = 0, numCount = 0;
+        for (let r = 1; r <= sampleSize; r++) {
+          const val = String(rows[r]?.[colIdx] ?? '').trim();
+          if (!val) continue;
+          const n = this.parseNumberString(val, payload?.thousandsSeparator, payload?.decimalSeparator);
+          if (n === null) continue;
+          numCount++;
+          if (Number.isInteger(n)) intCount++;
+        }
+        return numCount > 0 && intCount / numCount >= 0.9;
+      };
+
+      const normalizeGender = (v: string) => {
+        if (!v) return '';
+        const s = v.trim().toLowerCase();
+        if (['m', 'male', 'man'].includes(s)) return 'Male';
+        if (['f', 'female', 'woman'].includes(s)) return 'Female';
+        if (['other', 'o', 'non-binary', 'nonbinary'].includes(s)) return 'Other';
+        return v.trim();
+      };
+
+      const normalizeWeight = (v: string) => {
+        if (!v) return '';
+        let s = String(v).trim().toLowerCase();
+        // Replace comma decimal if user provided decimalSeparator
+        s = s.replace(/,/g, '.');
+        // Extract number
+        const match = s.match(/([-+]?[0-9]*\.?[0-9]+)/);
+        if (!match) return v.trim();
+        let n = parseFloat(match[1]);
+        if (s.includes('g') && !s.includes('kg')) {
+          // grams -> kg
+          if (n > 100) n = n / 1000;
+        }
+        // keep one decimal place for weight
+        return `${Math.round(n * 10) / 10}`;
+      };
+
+      const normalizeHeight = (v: string) => {
+        if (!v) return '';
+        let s = String(v).trim().toLowerCase();
+        s = s.replace(/,/g, '.');
+        const match = s.match(/([-+]?[0-9]*\.?[0-9]+)/);
+        if (!match) return v.trim();
+        let n = parseFloat(match[1]);
+        if (s.includes('m') && !s.includes('cm')) {
+          // value in meters -> convert to cm
+          if (n < 4) n = n * 100;
+        }
+        // height in cm, round to integer
+        return `${Math.round(n)}`;
+      };
+
+      // Find age columns and integer-like columns
+      const ageCols: number[] = [];
+      const integerLikeCols: Set<number> = new Set();
+      headers.forEach((h: string, idx: number) => {
+        const key = String(h || '').toLowerCase();
+        if (key.includes('age') || key.includes('tuoi')) ageCols.push(idx);
+        if (detectIntegerLike(idx)) integerLikeCols.add(idx);
+      });
+
+      // Apply normalization row-wise
+      for (let r = 1; r < rows.length; r++) {
+        const row = rows[r];
+        for (let c = 0; c < row.length; c++) {
+          let val = row[c];
+          if (val === null || val === undefined) { row[c] = ''; continue; }
+          let s = String(val).trim();
+          if (!s) { row[c] = ''; continue; }
+
+          // Gender normalization
+          const h = String(headers[c] || '').toLowerCase();
+          if (h.includes('gender')) {
+            row[c] = normalizeGender(s);
+            continue;
+          }
+
+          if (h.includes('weight')) {
+            row[c] = normalizeWeight(s);
+            continue;
+          }
+
+          if (h.includes('height')) {
+            row[c] = normalizeHeight(s);
+            continue;
+          }
+
+          // Age special handling: parse number, round to integer and clamp
+          if (ageCols.includes(c)) {
+            const n = this.parseNumberString(s, payload?.thousandsSeparator, payload?.decimalSeparator);
+            if (n === null || Number.isNaN(n)) { row[c] = ''; continue; }
+            let ni = Math.round(n);
+            if (ni < 0) ni = Math.abs(ni);
+            if (ni > 120) ni = ni; // keep as-is, user may have extreme
+            row[c] = `${ni}`;
+            continue;
+          }
+
+          // Generic integer-like columns rounding
+          if (integerLikeCols.has(c)) {
+            const n = this.parseNumberString(s, payload?.thousandsSeparator, payload?.decimalSeparator);
+            if (n !== null && !Number.isNaN(n)) {
+              row[c] = `${Math.round(n)}`;
+              continue;
+            }
+          }
+
+          // Numeric parse fallback: remove surrounding quotes and trim
+          row[c] = s;
+        }
+      }
+    } catch (e) {
+      this.logger.warn(`[cleanCsv] Value normalization failed: ${e?.message || e}`);
+    }
+
     return { data: rows, rowCount: rows.length, columnCount: rows[0]?.length || 0 };
+  }
+
+  private normalizeDateString(raw: string, preferredFormat?: string): string | null {
+    const s = String(raw).trim();
+    if (!s) return null;
+
+    const pad = (n: number) => (n < 10 ? '0' + n : '' + n);
+
+    // If preferred format provided, try to parse it (support common tokens DD/MM/YYYY, YYYY-MM-DD)
+    try {
+      if (preferredFormat) {
+        const fmt = preferredFormat.toUpperCase();
+        if (fmt.includes('DD') && fmt.includes('MM') && fmt.includes('YYYY')) {
+          // try splitting by non-digit
+          const parts = s.split(/[^0-9]+/).filter(Boolean);
+          if (parts.length >= 3) {
+            let d = 0, m = 0, y = 0;
+            if (fmt.indexOf('DD') < fmt.indexOf('MM')) {
+              d = parseInt(parts[0]); m = parseInt(parts[1]); y = parseInt(parts[2]);
+            } else {
+              y = parseInt(parts[0]); m = parseInt(parts[1]); d = parseInt(parts[2]);
+            }
+            if (!Number.isNaN(y) && !Number.isNaN(m) && !Number.isNaN(d)) {
+              const daysInMonth = new Date(y, m, 0).getDate();
+              if (m >= 1 && m <= 12 && d >= 1 && d <= daysInMonth) return `${y}-${pad(m)}-${pad(d)}`;
+            }
+          }
+        }
+      }
+
+      // Try common ISO like YYYY-MM-DD or YYYY/MM/DD
+      const isoMatch = s.match(/^(\d{4})[-\/]?(\d{1,2})[-\/]?(\d{1,2})$/);
+      if (isoMatch) {
+        const y = parseInt(isoMatch[1]), m = parseInt(isoMatch[2]), d = parseInt(isoMatch[3]);
+        const daysInMonth = new Date(y, m, 0).getDate();
+        if (m >= 1 && m <= 12 && d >= 1 && d <= daysInMonth) return `${y}-${pad(m)}-${pad(d)}`;
+      }
+
+      // Try DD/MM/YYYY or DD-MM-YYYY
+      const dmy = s.match(/^(\d{1,2})[-\/]?(\d{1,2})[-\/]?(\d{4})$/);
+      if (dmy) {
+        const d = parseInt(dmy[1]), m = parseInt(dmy[2]), y = parseInt(dmy[3]);
+        const daysInMonth = new Date(y, m, 0).getDate();
+        if (m >= 1 && m <= 12 && d >= 1 && d <= daysInMonth) return `${y}-${pad(m)}-${pad(d)}`;
+      }
+
+      // Fallback to Date.parse (catch invalid like 1980-01-32)
+      const parsed = Date.parse(s);
+      if (!Number.isNaN(parsed)) {
+        const dt = new Date(parsed);
+        const y = dt.getUTCFullYear(); const m = dt.getUTCMonth() + 1; const d = dt.getUTCDate();
+        return `${y}-${pad(m)}-${pad(d)}`;
+      }
+    } catch (e) {
+      return null;
+    }
+    return null;
+  }
+
+  private parseNumberString(raw: string, thousandsSeparator?: string, decimalSeparator?: string): number | null {
+    if (raw === null || raw === undefined) return null;
+    let s = String(raw).trim();
+    if (!s) return null;
+
+    // If separators are provided, normalize them
+    if (thousandsSeparator) {
+      const esc = thousandsSeparator.replace(/[-/\\^$*+?.()|[\]{}]/g, '\\$&');
+      s = s.replace(new RegExp(esc, 'g'), '');
+    } else {
+      // Remove common thousands separators
+      s = s.replace(/\.(?=\d{3}(?:\D|$))/g, '');
+      s = s.replace(/,(?=\d{3}(?:\D|$))/g, '');
+    }
+
+    if (decimalSeparator && decimalSeparator !== '.') {
+      const esc = decimalSeparator.replace(/[-/\\^$*+?.()|[\]{}]/g, '\\$&');
+      s = s.replace(new RegExp(esc, 'g'), '.');
+    } else {
+      // allow comma as decimal if not thousands-like
+      if ((s.match(/,/g) || []).length === 1 && !s.includes('.')) s = s.replace(',', '.');
+    }
+
+    // Remove non-numeric trailing chars (units) but keep leading sign and decimal
+    const m = s.match(/[-+]?[0-9]*\.?[0-9]+/);
+    if (!m) return null;
+    const num = parseFloat(m[0]);
+    if (Number.isNaN(num)) return null;
+    return num;
   }
 
   /** ========================= LARGE CSV TEXT CLEAN (with progress) ========================= */
