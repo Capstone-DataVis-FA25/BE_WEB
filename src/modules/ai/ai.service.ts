@@ -583,64 +583,93 @@ IMPORTANT: Speak naturally about UI elements users can see. DON'T expose technic
   private async sendCleanRequest(csvText: string, payload?: Partial<CleanCsvDto>): Promise<string> {
     const MAX_CHARS = 30_000; // Drastically reduced to avoid output token limits
     const MAX_TOKENS = 10_000; // Reduced input tokens
-    const MAX_OUTPUT_TOKENS = 8_000; // Reduced output token limit
+    const MAX_OUTPUT_TOKENS = 10_000; // Reduced output token limit
     const REQUEST_TIMEOUT = 60000; // 60 seconds
 
     this.logger.log(`[sendCleanRequest] Starting, CSV length: ${csvText.length}`);
 
-    // Build additional cleaning instructions based on user-selected options
-    const additionalInstructions: string[] = [];
+    // Use a canonical, strict system prompt designed to make the model reliably
+    // return clean CSV data in the required JSON shape and to avoid destructive
+    // behavior (like inventing or deleting rows) even under ambiguous 'auto' settings.
+    // The selected options block (appended below) still drives strategy choices.
+    const rawMissingStrategy = (payload as any)?.missingStrategy;
+    const effectiveMissingStrategy = rawMissingStrategy ?? (payload?.handleMissingValues === true ? 'fill_mean' : 'fill_mean');
 
-    if (payload?.removeOutliers === true) {
-      additionalInstructions.push('- Remove or cap outliers: detect numeric outliers using IQR method and cap them to reasonable bounds');
+    // Declare instructions array
+    const instructions: string[] = [];
+
+    if (effectiveMissingStrategy === 'remove') {
+      instructions.push('- Remove rows that contain missing values (treat missing critical identifiers like ID/Name as reason to remove).');
+    } else if (effectiveMissingStrategy === 'fill_mean') {
+      instructions.push('- Fill missing values: for numeric columns use the mean (rounded according to column type), for categorical use the mode. Do NOT remove rows unless a critical identifier is missing.');
+    } else if (effectiveMissingStrategy === 'fill_mode') {
+      instructions.push('- Fill missing values using the mode (most common value) for categorical or numeric fields. Do NOT remove rows.');
+    } else { // 'auto' or any other
+      instructions.push('- For missing/empty values: if a row misses critical identifiers (e.g., ID or Name) remove it; otherwise, if >30% fields missing remove the row, if ≤30% fill missing values (mean for numeric, mode for categorical) and document filled values. Prefer filling when possible.');
     }
 
-    if (payload?.validateDomain === true) {
-      additionalInstructions.push('- Validate domain constraints: check if values make sense (e.g., age 0-120, valid email format)');
-    }
+    const rawOutlierStrategy = (payload as any)?.outlierStrategy;
+    const effectiveOutlierStrategy = rawOutlierStrategy ?? (payload?.removeOutliers === true ? 'auto' : 'auto');
 
-    if (payload?.standardizeUnits === true) {
-      additionalInstructions.push('- Standardize units: convert all measurements to consistent units (e.g., km to m, lbs to kg)');
-    }
+    // Include any free-text notes the user provided at the very top
+    const notesPrefix = payload?.notes ? String(payload.notes).trim() + '\n\n' : '';
 
-    // Base cleaning instructions (always applied)
-    const baseInstructions = [
-      '- Trim whitespace from all cells',
-      '- Remove exact duplicate rows (keep first occurrence)',
-      '- Standardize text case: capitalize proper names (cities, person names), use title case for multi-word fields',
-      '- For city names: standardize common variations (e.g., "Sài Gòn", "HCM", "ho chi minh", "Thành Phố Hồ Chí Minh" → all become "Ho Chi Minh")',
-      '- For person names: capitalize each word properly (e.g., "john doe", "JOHN DOE" → "John Doe")',
-      '- For gender field: standardize to "Male", "Female", "Other" (case-insensitive match)',
-      '- For numeric columns:',
-      '  * Remove all non-numeric characters except decimal separator',
-      `  * Apply thousand separator: ${payload?.thousandsSeparator || ' '}`,
-      `  * Apply decimal separator: ${payload?.decimalSeparator || '.'}`,
-      '  * Format numbers consistently (e.g., 1000 → 1,000 if thousand separator is comma)',
-      '  * Remove outliers that are clearly errors (e.g., weight=6000kg, height=1.70m, age=150)',
-      '- For missing/empty values - IMPORTANT RULES:',
-      '  * First check: if row has ID column and ID is missing → REMOVE the entire row',
-      '  * Second check: if row has name column and name is missing → REMOVE the entire row',
-      '  * Third check: count missing fields in the row:',
-      '    - If >30% fields missing → REMOVE the entire row',
-      '    - If ≤30% fields missing → KEEP row and fill ALL missing values using these rules:',
-      '  * For kept rows with missing values, fill based on column type:',
-      '    - Numeric columns (age, weight, height, income, etc.): calculate mean/median of that column, fill missing cells with the mean (rounded appropriately)',
-      '    - Text columns (city, name, status, etc.): find the MOST COMMON value (mode) in that column and fill missing cells with that value',
-      '    - Date columns: find the MOST COMMON date in that column and fill missing cells with that date',
-      '    - Gender/category columns: find the MOST COMMON category and fill missing cells with that value',
-      '  * IMPORTANT: Calculate mean/mode BEFORE filling, then apply to all missing cells in that column',
-      '  * Each row MUST have same number of columns as header',
-      '  * Do NOT remove columns, do NOT shift data, do NOT leave any empty cells',
-      '- For date columns: standardize to YYYY-MM-DD format',
-      '- Do NOT invent data, do NOT add new rows, do NOT skip columns'
-    ];
+    // Append a clear, explicit summary of the selected options so the AI
+    // follows the user's exact choices (avoid ambiguity from 'auto').
+    const selectedOptionsBlockLines: string[] = [];
+    selectedOptionsBlockLines.push('\n-- SELECTED OPTIONS FROM USER --');
+    selectedOptionsBlockLines.push(`missingStrategy: ${effectiveMissingStrategy}`);
+    selectedOptionsBlockLines.push(`outlierStrategy: ${effectiveOutlierStrategy}`);
+    selectedOptionsBlockLines.push(`removeDuplicates: ${Boolean(payload?.removeDuplicates)}`);
+    selectedOptionsBlockLines.push(`fixDataTypes: ${Boolean(payload?.fixDataTypes)}`);
+    selectedOptionsBlockLines.push(`standardizeFormats: ${Boolean(payload?.standardizeFormats)}`);
+    selectedOptionsBlockLines.push(`standardizeUnits: ${Boolean(payload?.standardizeUnits)}`);
+    if (payload?.thousandsSeparator) selectedOptionsBlockLines.push(`thousandsSeparator: ${payload?.thousandsSeparator}`);
+    if (payload?.decimalSeparator) selectedOptionsBlockLines.push(`decimalSeparator: ${payload?.decimalSeparator}`);
+    if (payload?.dateFormat) selectedOptionsBlockLines.push(`dateFormat: ${payload?.dateFormat}`);
 
-    // Combine base instructions with additional user-selected options
-    const allInstructions = [...baseInstructions, ...additionalInstructions];
+    const canonicalSystemPrompt = `Bạn là một trợ lý làm sạch dữ liệu rất chính xác. Thực hiện đúng các quy tắc bên dưới và CHỈ trả về một đối tượng JSON như mục "RESPONSE FORMAT" yêu cầu — không được thêm bình luận hay text khác.
 
-    const systemPrompt = (payload?.notes ? payload.notes + '\n\n' : '') +
-      'You are a data cleaning assistant. Clean the CSV data and return it in the "data" field as a 2D array. The first inner array is the header row.\n' +
-      allInstructions.join('\n');
+NGUYÊN TẮC CHUNG:
+1) KHÔNG phát minh dữ liệu. Không thêm hàng mới. Không thay đổi số cột, thứ tự cột hay tên cột.
+2) GIỮ nguyên giá trị gốc nếu việc sửa sẽ phải đoán (nếu không chắc chắn, để nguyên).
+3) Ưu tiên GIỮ hàng; chỉ XÓA hàng khi chiến lược trong SELECTED OPTIONS yêu cầu 'remove' và hàng thiếu identifier quan trọng (ID/Name).
+4) MISSING: làm theo SELECTED OPTIONS — 'fill_mean' / 'fill_mode' / 'remove'. Nếu fill: numeric dùng mean (làm tròn theo quy tắc cột), categorical dùng mode.
+5) INTEGER ROUNDED FILL: Nếu cột là integer-like (ví dụ age, counts) thì mọi giá trị fill phải làm tròn thành số nguyên và trả về không có dấu thập phân (ví dụ "25"). Nếu cột có thập phân, giữ độ chính xác hợp lý.
+6) DATES: Chuẩn hóa mọi ngày theo định dạng ISO YYYY-MM-DD. Nếu không thể parse hợp lệ, GIỮ nguyên chuỗi ban đầu (ví dụ "1980-01-32" vẫn trả về "1980-01-32").
+7) UNITS: Chuẩn hóa units khi rõ ràng (weight → kg 1 chữ số thập phân; height → cm integer). Nếu unit không chắc, giữ nguyên.
+8) OUTLIERS: làm theo SELECTED OPTIONS — ưu tiên cap (giới hạn) hơn xóa nếu không chắc.
+9) DUPLICATES: nếu SELECTED OPTIONS yêu cầu removeDuplicates=true thì xóa trùng chính xác, giữ bản đầu tiên.
+10) SỐ: Khi parsing số, dùng thousandsSeparator và decimalSeparator từ SELECTED OPTIONS nếu có.
+11) KẾT QUẢ TẤT CẢ PHẦN TỬ: Mỗi ô phải là chuỗi JSON (đóng bằng dấu ngoặc kép).
+
+SELECTED OPTIONS (chèn chính xác từ client):
+missingStrategy: <remove|fill_mean|fill_mode|auto>
+outlierStrategy: <remove|cap|auto>
+removeDuplicates: <true|false>
+thousandsSeparator: <'.' or ',' or ''>
+decimalSeparator: <'.' or ',' or ''>
+standardizeUnits: <true|false>
+standardizeFormats: <true|false>
+
+RESPONSE FORMAT (bắt buộc — trả về đúng định dạng và KHÔNG có text khác):
+{
+  "data": [
+    ["col1","col2","col3",...],
+    ["r1c1","r1c2","r1c3",...],
+    ...
+  ]
+}
+
+Ví dụ ngắn:
+Input header: ["id","name","age","date_of_birth","weight"]
+- Nếu age = 25.5 và cột là integer-like → trả "25"
+- Nếu date_of_birth = "1980-01-32" (invalid) → trả "1980-01-32"
+- Nếu weight = "700g" → trả "0.7" (kg, một chữ số thập phân) nếu SELECTED OPTIONS.standardizeUnits = true
+
+Thực hiện theo quy tắc này CHÍNH XÁC và chỉ trả về JSON theo "RESPONSE FORMAT".`;
+
+    const systemPrompt = notesPrefix + canonicalSystemPrompt + '\n' + selectedOptionsBlockLines.join('\n');
     const userPrompt = 'Original CSV:\n' + csvText;
 
     if (csvText.length > MAX_CHARS || this.estimateTokens(systemPrompt + userPrompt) > MAX_TOKENS) {
@@ -683,6 +712,30 @@ IMPORTANT: Speak naturally about UI elements users can see. DON'T expose technic
         },
       },
     };
+
+    // Log a safe, truncated preview of the request body for debugging
+    try {
+      const safeSystem = systemPrompt && systemPrompt.length > 1000 ? systemPrompt.slice(0, 1000) + '...[truncated]' : systemPrompt;
+      const safeUserPreview = userPrompt && userPrompt.length > 1000 ? userPrompt.slice(0, 1000) + `...[truncated ${userPrompt.length} chars]` : userPrompt;
+      const optionSummary = {
+        removeDuplicates: payload?.removeDuplicates,
+        fixDataTypes: payload?.fixDataTypes,
+        missingStrategy: (payload as any)?.missingStrategy ?? effectiveMissingStrategy,
+        outlierStrategy: (payload as any)?.outlierStrategy ?? effectiveOutlierStrategy,
+        standardizeFormats: payload?.standardizeFormats,
+        standardizeUnits: payload?.standardizeUnits,
+        validateDomain: payload?.validateDomain,
+        thousandsSeparator: payload?.thousandsSeparator,
+        decimalSeparator: payload?.decimalSeparator,
+        dateFormat: payload?.dateFormat,
+      };
+      this.logger.debug(`[sendCleanRequest] Request preview — model: ${this.model}, max_tokens: ${MAX_OUTPUT_TOKENS}, system_len: ${systemPrompt.length}, user_len: ${userPrompt.length}`);
+      this.logger.debug(`[sendCleanRequest] systemPreview: ${safeSystem}`);
+      this.logger.debug(`[sendCleanRequest] userPreview(first 1000 chars): ${safeUserPreview}`);
+      this.logger.debug(`[sendCleanRequest] options: ${JSON.stringify(optionSummary)}`);
+    } catch (previewErr) {
+      this.logger.debug(`[sendCleanRequest] Failed to build request preview: ${previewErr?.message || previewErr}`);
+    }
 
     const maxRetries = 4;
     for (let attempt = 0; attempt <= maxRetries; attempt++) {
@@ -785,6 +838,10 @@ IMPORTANT: Speak naturally about UI elements users can see. DON'T expose technic
     const csvText = (payload?.csv ?? '').toString();
     if (!csvText) throw new BadRequestException('CSV is empty');
 
+    // Keep a copy of original rows so we can restore cells when the AI
+    // returns obvious placeholders (e.g. '?', 'n/a') or otherwise invalid tokens.
+    const originalRows = this.csvToRows(csvText);
+
     this.logger.log(`[cleanCsv] Starting, CSV length: ${csvText.length} chars`);
     this.logger.debug(`[cleanCsv] API key configured: ${this.apiKey ? 'YES' : 'NO'}`);
     this.logger.debug(`[cleanCsv] Model: ${this.model}`);
@@ -833,7 +890,272 @@ IMPORTANT: Speak naturally about UI elements users can see. DON'T expose technic
 
     this.logger.log(`[cleanCsv] Parsed ${rows.length} rows`);
 
+    // If AI returned placeholder tokens or obvious invalid markers, prefer
+    // restoring the original cell value from the uploaded CSV rather than
+    // propagating '?' or 'n/a' into the cleaned dataset.
+    try {
+      const placeholderPattern = /^(\?|\s*-\s*|n\/?a|na|null|none)$/i;
+      const maxR = Math.min(rows.length, originalRows.length);
+      const issues: Array<{ row: number; col: number; header?: string; got: string; restored?: string }> = [];
+
+      for (let r = 1; r < maxR; r++) {
+        const outRow = rows[r] || [];
+        const origRow = originalRows[r] || [];
+        for (let c = 0; c < outRow.length; c++) {
+          const outVal = String(outRow[c] ?? '').trim();
+          if (!outVal) continue; // empty string — skip
+          if (placeholderPattern.test(outVal)) {
+            const origVal = String(origRow[c] ?? '').trim();
+            if (origVal && origVal !== outVal) {
+              issues.push({ row: r + 1, col: c + 1, header: String(rows[0]?.[c] ?? ''), got: outVal, restored: origVal });
+              rows[r][c] = origVal;
+            }
+          }
+        }
+      }
+
+      if (issues.length) {
+        this.logger.warn(`[cleanCsv] Replaced ${issues.length} placeholder cells with original values to avoid data loss. Example: ${JSON.stringify(issues.slice(0,3))}`);
+      }
+    } catch (e) {
+      this.logger.warn(`[cleanCsv] Placeholder restoration failed: ${e?.message || e}`);
+    }
+
+    // Server-side normalization for date-like columns to ensure consistent YYYY-MM-DD
+    try {
+      const headers = rows[0] || [];
+      const dateColIndexes: number[] = [];
+      headers.forEach((h: string, idx: number) => {
+        if (String(h || '').toLowerCase().match(/date|dob|birth|born|ngay|year/)) dateColIndexes.push(idx);
+      });
+
+      if (dateColIndexes.length) {
+        for (let r = 1; r < rows.length; r++) {
+          const row = rows[r];
+          for (const ci of dateColIndexes) {
+            const raw = String(row[ci] ?? '').trim();
+            if (!raw) continue;
+            const normalized = this.normalizeDateString(raw, payload?.dateFormat);
+            // If we can't normalize, keep the original raw value instead of clearing it
+            row[ci] = normalized ?? raw;
+          }
+        }
+      }
+    } catch (e) {
+      this.logger.warn(`[cleanCsv] Date normalization failed: ${e?.message || e}`);
+    }
+
+    // Server-side normalization for numeric, gender, height, weight and age columns
+    try {
+      const headers = rows[0] || [];
+      const sampleSize = Math.min(50, rows.length - 1);
+
+      const detectIntegerLike = (colIdx: number) => {
+        let intCount = 0, numCount = 0;
+        for (let r = 1; r <= sampleSize; r++) {
+          const val = String(rows[r]?.[colIdx] ?? '').trim();
+          if (!val) continue;
+          const n = this.parseNumberString(val, payload?.thousandsSeparator, payload?.decimalSeparator);
+          if (n === null) continue;
+          numCount++;
+          if (Number.isInteger(n)) intCount++;
+        }
+        return numCount > 0 && intCount / numCount >= 0.9;
+      };
+
+      const normalizeGender = (v: string) => {
+        if (!v) return '';
+        const s = v.trim().toLowerCase();
+        if (['m', 'male', 'man'].includes(s)) return 'Male';
+        if (['f', 'female', 'woman'].includes(s)) return 'Female';
+        if (['other', 'o', 'non-binary', 'nonbinary'].includes(s)) return 'Other';
+        return v.trim();
+      };
+
+      const normalizeWeight = (v: string) => {
+        if (!v) return '';
+        let s = String(v).trim().toLowerCase();
+        // Replace comma decimal if user provided decimalSeparator
+        s = s.replace(/,/g, '.');
+        // Extract number
+        const match = s.match(/([-+]?[0-9]*\.?[0-9]+)/);
+        if (!match) return v.trim();
+        let n = parseFloat(match[1]);
+        if (s.includes('g') && !s.includes('kg')) {
+          // grams -> kg
+          if (n > 100) n = n / 1000;
+        }
+        // keep one decimal place for weight
+        return `${Math.round(n * 10) / 10}`;
+      };
+
+      const normalizeHeight = (v: string) => {
+        if (!v) return '';
+        let s = String(v).trim().toLowerCase();
+        s = s.replace(/,/g, '.');
+        const match = s.match(/([-+]?[0-9]*\.?[0-9]+)/);
+        if (!match) return v.trim();
+        let n = parseFloat(match[1]);
+        if (s.includes('m') && !s.includes('cm')) {
+          // value in meters -> convert to cm
+          if (n < 4) n = n * 100;
+        }
+        // height in cm, round to integer
+        return `${Math.round(n)}`;
+      };
+
+      // Find age columns and integer-like columns
+      const ageCols: number[] = [];
+      const integerLikeCols: Set<number> = new Set();
+      headers.forEach((h: string, idx: number) => {
+        const key = String(h || '').toLowerCase();
+        if (key.includes('age') || key.includes('tuoi')) ageCols.push(idx);
+        if (detectIntegerLike(idx)) integerLikeCols.add(idx);
+      });
+
+      // Apply normalization row-wise
+      for (let r = 1; r < rows.length; r++) {
+        const row = rows[r];
+        for (let c = 0; c < row.length; c++) {
+          let val = row[c];
+          if (val === null || val === undefined) { row[c] = ''; continue; }
+          let s = String(val).trim();
+          if (!s) { row[c] = ''; continue; }
+
+          // Gender normalization
+          const h = String(headers[c] || '').toLowerCase();
+          if (h.includes('gender')) {
+            row[c] = normalizeGender(s);
+            continue;
+          }
+
+          if (h.includes('weight')) {
+            row[c] = normalizeWeight(s);
+            continue;
+          }
+
+          if (h.includes('height')) {
+            row[c] = normalizeHeight(s);
+            continue;
+          }
+
+          // Age special handling: parse number, round to integer and clamp
+          if (ageCols.includes(c)) {
+            const n = this.parseNumberString(s, payload?.thousandsSeparator, payload?.decimalSeparator);
+            if (n === null || Number.isNaN(n)) { row[c] = ''; continue; }
+            let ni = Math.round(n);
+            if (ni < 0) ni = Math.abs(ni);
+            if (ni > 120) ni = ni; // keep as-is, user may have extreme
+            row[c] = `${ni}`;
+            continue;
+          }
+
+          // Generic integer-like columns rounding
+          if (integerLikeCols.has(c)) {
+            const n = this.parseNumberString(s, payload?.thousandsSeparator, payload?.decimalSeparator);
+            if (n !== null && !Number.isNaN(n)) {
+              row[c] = `${Math.round(n)}`;
+              continue;
+            }
+          }
+
+          // Numeric parse fallback: remove surrounding quotes and trim
+          row[c] = s;
+        }
+      }
+    } catch (e) {
+      this.logger.warn(`[cleanCsv] Value normalization failed: ${e?.message || e}`);
+    }
+
     return { data: rows, rowCount: rows.length, columnCount: rows[0]?.length || 0 };
+  }
+
+  private normalizeDateString(raw: string, preferredFormat?: string): string | null {
+    const s = String(raw).trim();
+    if (!s) return null;
+
+    const pad = (n: number) => (n < 10 ? '0' + n : '' + n);
+
+    // If preferred format provided, try to parse it (support common tokens DD/MM/YYYY, YYYY-MM-DD)
+    try {
+      if (preferredFormat) {
+        const fmt = preferredFormat.toUpperCase();
+        if (fmt.includes('DD') && fmt.includes('MM') && fmt.includes('YYYY')) {
+          // try splitting by non-digit
+          const parts = s.split(/[^0-9]+/).filter(Boolean);
+          if (parts.length >= 3) {
+            let d = 0, m = 0, y = 0;
+            if (fmt.indexOf('DD') < fmt.indexOf('MM')) {
+              d = parseInt(parts[0]); m = parseInt(parts[1]); y = parseInt(parts[2]);
+            } else {
+              y = parseInt(parts[0]); m = parseInt(parts[1]); d = parseInt(parts[2]);
+            }
+            if (!Number.isNaN(y) && !Number.isNaN(m) && !Number.isNaN(d)) {
+              const daysInMonth = new Date(y, m, 0).getDate();
+              if (m >= 1 && m <= 12 && d >= 1 && d <= daysInMonth) return `${y}-${pad(m)}-${pad(d)}`;
+            }
+          }
+        }
+      }
+
+      // Try common ISO like YYYY-MM-DD or YYYY/MM/DD
+      const isoMatch = s.match(/^(\d{4})[-\/]?(\d{1,2})[-\/]?(\d{1,2})$/);
+      if (isoMatch) {
+        const y = parseInt(isoMatch[1]), m = parseInt(isoMatch[2]), d = parseInt(isoMatch[3]);
+        const daysInMonth = new Date(y, m, 0).getDate();
+        if (m >= 1 && m <= 12 && d >= 1 && d <= daysInMonth) return `${y}-${pad(m)}-${pad(d)}`;
+      }
+
+      // Try DD/MM/YYYY or DD-MM-YYYY
+      const dmy = s.match(/^(\d{1,2})[-\/]?(\d{1,2})[-\/]?(\d{4})$/);
+      if (dmy) {
+        const d = parseInt(dmy[1]), m = parseInt(dmy[2]), y = parseInt(dmy[3]);
+        const daysInMonth = new Date(y, m, 0).getDate();
+        if (m >= 1 && m <= 12 && d >= 1 && d <= daysInMonth) return `${y}-${pad(m)}-${pad(d)}`;
+      }
+
+      // Fallback to Date.parse (catch invalid like 1980-01-32)
+      const parsed = Date.parse(s);
+      if (!Number.isNaN(parsed)) {
+        const dt = new Date(parsed);
+        const y = dt.getUTCFullYear(); const m = dt.getUTCMonth() + 1; const d = dt.getUTCDate();
+        return `${y}-${pad(m)}-${pad(d)}`;
+      }
+    } catch (e) {
+      return null;
+    }
+    return null;
+  }
+
+  private parseNumberString(raw: string, thousandsSeparator?: string, decimalSeparator?: string): number | null {
+    if (raw === null || raw === undefined) return null;
+    let s = String(raw).trim();
+    if (!s) return null;
+
+    // If separators are provided, normalize them
+    if (thousandsSeparator) {
+      const esc = thousandsSeparator.replace(/[-/\\^$*+?.()|[\]{}]/g, '\\$&');
+      s = s.replace(new RegExp(esc, 'g'), '');
+    } else {
+      // Remove common thousands separators
+      s = s.replace(/\.(?=\d{3}(?:\D|$))/g, '');
+      s = s.replace(/,(?=\d{3}(?:\D|$))/g, '');
+    }
+
+    if (decimalSeparator && decimalSeparator !== '.') {
+      const esc = decimalSeparator.replace(/[-/\\^$*+?.()|[\]{}]/g, '\\$&');
+      s = s.replace(new RegExp(esc, 'g'), '.');
+    } else {
+      // allow comma as decimal if not thousands-like
+      if ((s.match(/,/g) || []).length === 1 && !s.includes('.')) s = s.replace(',', '.');
+    }
+
+    // Remove non-numeric trailing chars (units) but keep leading sign and decimal
+    const m = s.match(/[-+]?[0-9]*\.?[0-9]+/);
+    if (!m) return null;
+    const num = parseFloat(m[0]);
+    if (Number.isNaN(num)) return null;
+    return num;
   }
 
   /** ========================= LARGE CSV TEXT CLEAN (with progress) ========================= */
@@ -901,7 +1223,7 @@ IMPORTANT: Speak naturally about UI elements users can see. DON'T expose technic
           const csv = await this.rowsToCsv([header, ...sub]);
 
           try {
-            const cleaned = await this.cleanCsv({ csv, notes: options?.notes } as any);
+            const cleaned = await this.cleanCsv({ csv, ...(options || {}) } as any);
             if (Array.isArray(cleaned?.data) && cleaned.data.length) {
               subResults.push(...cleaned.data.slice(1)); // skip header
             } else {
@@ -920,7 +1242,7 @@ IMPORTANT: Speak naturally about UI elements users can see. DON'T expose technic
 
                 try {
                   const csv1 = await this.rowsToCsv([header, ...firstHalf]);
-                  const cleaned1 = await this.cleanCsv({ csv: csv1, notes: options?.notes } as any);
+                  const cleaned1 = await this.cleanCsv({ csv: csv1, ...(options || {}) } as any);
                   if (Array.isArray(cleaned1?.data) && cleaned1.data.length) {
                     subResults.push(...cleaned1.data.slice(1));
                   }
@@ -930,7 +1252,7 @@ IMPORTANT: Speak naturally about UI elements users can see. DON'T expose technic
 
                 try {
                   const csv2 = await this.rowsToCsv([header, ...secondHalf]);
-                  const cleaned2 = await this.cleanCsv({ csv: csv2, notes: options?.notes } as any);
+                  const cleaned2 = await this.cleanCsv({ csv: csv2, ...(options || {}) } as any);
                   if (Array.isArray(cleaned2?.data) && cleaned2.data.length) {
                     subResults.push(...cleaned2.data.slice(1));
                   }
@@ -1002,11 +1324,11 @@ IMPORTANT: Speak naturally about UI elements users can see. DON'T expose technic
     return rows.filter(r => (r || []).some(cell => String(cell ?? '').trim() !== ''));
   }
 
-  private csvToRows(csv: string): any[][] {
-    return csv.replace(/\r\n/g, '\n').split('\n').filter(l => l.trim() !== '').map(this.parseCsvLine);
+  private csvToRows(csv: string, payload?: any): any[][] {
+    return csv.replace(/\r\n/g, '\n').split('\n').filter(l => l.trim() !== '').map(line => this.parseCsvLine(line, payload));
   }
 
-  private parseCsvLine(line: string): string[] {
+  private parseCsvLine(line: string, payload?: any): string[] {
     const result: string[] = [];
     let current = '', inQuotes = false;
     for (let i = 0; i < line.length; i++) {
@@ -1023,7 +1345,6 @@ IMPORTANT: Speak naturally about UI elements users can see. DON'T expose technic
     result.push(current);
     return result;
   }
-
   private async rowsToCsv(rows: any[][]): Promise<string> {
     const escapeCell = (v: any) => {
       const s = String(v ?? '').trim();
