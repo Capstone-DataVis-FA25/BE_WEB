@@ -216,7 +216,7 @@ NGUYÊN TẮC CHUNG:
 1) KHÔNG phát minh dữ liệu. Không thêm hàng mới. Không thay đổi số cột, thứ tự cột hay tên cột.
 2) GIỮ nguyên giá trị gốc nếu việc sửa sẽ phải đoán (nếu không chắc chắn, để nguyên).
 3) Ưu tiên GIỮ hàng; chỉ XÓA hàng khi chiến lược trong SELECTED OPTIONS yêu cầu 'remove' và hàng thiếu identifier quan trọng (ID/Name).
-4) MISSING: làm theo SELECTED OPTIONS — 'fill_mean' / 'fill_mode' / 'remove'. Nếu fill: numeric dùng mean (làm tròn theo quy tắc cột), categorical dùng mode.
+4) autofill missing and outliner: numeric dùng mean (làm tròn theo quy tắc cột), categorical dùng mode.
 5) INTEGER ROUNDED FILL: Nếu cột là integer-like (ví dụ age, counts) thì mọi giá trị fill phải làm tròn thành số nguyên và trả về không có dấu thập phân (ví dụ "25"). Nếu cột có thập phân, giữ độ chính xác hợp lý.
 6) DATES: Chuẩn hóa mọi ngày theo định dạng ISO YYYY-MM-DD. Nếu không thể parse hợp lệ, GIỮ nguyên chuỗi ban đầu (ví dụ "1980-01-32" vẫn trả về "1980-01-32").
 7) UNITS: Chuẩn hóa units khi rõ ràng (weight → kg 1 chữ số thập phân; height → cm integer). Nếu unit không chắc, giữ nguyên.
